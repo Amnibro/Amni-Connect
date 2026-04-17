@@ -1,0 +1,282 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Amni-Connect &bull; E2EE Remote Desktop</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+        :root { --primary: #6366f1; --primary-dark: #4f46e5; }
+        body { margin: 0; font-family: 'Inter', system-ui, sans-serif; background: linear-gradient(135deg, #1e2937, #0f172a); color: #e2e8f0; height: 100vh; overflow: hidden; }
+        .container { display: flex; flex-direction: column; height: 100vh; }
+        header { background: rgba(15,23,42,0.8); padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #334155; backdrop-filter: blur(12px); }
+        .logo { font-size: 22px; font-weight: 700; color: white; display: flex; align-items: center; gap: 10px; }
+        .status { padding: 8px 20px; border-radius: 9999px; font-size: 13px; font-weight: 500; }
+        .main { flex: 1; display: flex; padding: 32px; gap: 32px; overflow: hidden; }
+        .panel { background: rgba(15,23,42,0.6); border-radius: 16px; padding: 28px; border: 1px solid #334155; backdrop-filter: blur(12px); min-width: 320px; }
+        h2 { margin: 0 0 20px 0; color: #94a3b8; font-size: 15px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+        input { width: 100%; padding: 16px; background: #1e2937; border: 2px solid #475569; border-radius: 12px; color: white; font-size: 18px; margin-bottom: 16px; box-sizing: border-box; }
+        button { width: 100%; padding: 14px; background: var(--primary); color: white; border: none; border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s; margin-bottom: 12px; }
+        button:hover { background: var(--primary-dark); transform: translateY(-1px); }
+        button.danger { background: #ef4444; }
+        #remoteScreen { flex: 1; background: #000; border-radius: 16px; overflow: hidden; position: relative; border: 1px solid #334155; display: none; }
+        #remoteScreen video { width: 100%; height: 100%; object-fit: contain; }
+        .overlay { position: absolute; inset: 0; pointer-events: none; }
+        .room-code { font-family: monospace; font-size: 32px; letter-spacing: 4px; background: #1e2937; padding: 16px 24px; border-radius: 12px; text-align: center; margin: 20px 0; color: #a5b4fc; }
+        .log { font-size: 12px; background: #0f172a; padding: 16px; border-radius: 8px; height: 160px; overflow-y: auto; font-family: monospace; line-height: 1.5; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">&#128274; Amni-Connect</div>
+            <div id="status" class="status">Disconnected</div>
+        </header>
+        <div class="main">
+            <div class="panel">
+                <h2>Session Control</h2>
+                <div id="hostMode">
+                    <input type="text" id="customRoomCode" placeholder="Optional: Persistent Room Code" style="text-transform:uppercase">
+                    <select id="monitorSelect" style="width: 100%; padding: 14px; background: #1e2937; border: 2px solid #475569; border-radius: 12px; color: white; font-size: 16px; margin-bottom: 16px; outline: none;"></select>
+                    <button onclick="createAndHost()">&#128640; Start Hosting (Share Screen)</button>
+                </div>
+                <div id="viewerMode">
+                    <input type="text" id="roomCodeInput" placeholder="Enter Room Code" maxlength="32" style="text-transform:uppercase">
+                    <button onclick="joinSession()">🔗 Join Remote Session</button>
+                </div>
+                <div id="activeSession" style="display:none;">
+                    <div class="room-code" id="displayCode">———</div>
+                    <button onclick="copyCode()" style="background:#22c55e">📋 Copy Code</button>
+                    <button onclick="copyLink()" style="background:#3b82f6">🔗 Copy Mobile Link</button>
+                    <button onclick="endSession()" class="danger">⛔ End Session</button>
+                </div>
+                <h2 style="margin-top:32px">Connection Log</h2>
+                <div id="log" class="log"></div>
+            </div>
+            <div id="remoteScreen">
+                <video id="remoteVideo" autoplay playsinline></video>
+                <div class="overlay" id="inputOverlay" style="pointer-events:auto"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="node_modules/socket.io-client/dist/socket.io.min.js"></script>
+    <script>
+        const SIGNALING_URL = 'http://localhost:3389';
+        const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
+        let socket, pc, localStream, roomId, isHost = false;
+        const logEl = document.getElementById('log');
+        const statusEl = document.getElementById('status');
+        const remoteScreen = document.getElementById('remoteScreen');
+        const remoteVideo = document.getElementById('remoteVideo');
+
+        function log(msg, type = 'info') {
+            const color = type === 'success' ? '#86efac' : type === 'error' ? '#fda4af' : '#e0f2fe';
+            logEl.innerHTML += `<span style="color:${color}">[${new Date().toLocaleTimeString()}] ${msg}</span><br>`;
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function setStatus(text, color = '#64748b') {
+            statusEl.textContent = text;
+            statusEl.style.background = color;
+        }
+
+        function initSocket() {
+            socket = io(SIGNALING_URL, { transports: ['websocket'] });
+            socket.on('connect', () => log('Signaling server connected', 'success'));
+            socket.on('connect_error', () => log('Cannot reach signaling server — is it running?', 'error'));
+            socket.on('offer', async ({ offer }) => {
+                if (!pc) createPC();
+                await pc.setRemoteDescription(new RTCSessionDescription(offer));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                socket.emit('answer', { roomId, answer });
+                log('WebRTC answer sent');
+            });
+            socket.on('answer', async ({ answer }) => {
+                await pc?.setRemoteDescription(new RTCSessionDescription(answer));
+                log('WebRTC answer received', 'success');
+            });
+            socket.on('ice-candidate', ({ candidate }) => pc?.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {}));
+            socket.on('host-disconnected', () => { log('Host disconnected', 'error'); setStatus('Disconnected', '#ef4444'); });
+        }
+
+        let dataChannel;
+        function createPC() {
+            pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+            pc.onicecandidate = ({ candidate }) => candidate && socket.emit('ice-candidate', { roomId, candidate });
+            pc.onconnectionstatechange = () => log(`WebRTC: ${pc.connectionState}`);
+            pc.ontrack = ({ streams }) => {
+                remoteVideo.srcObject = streams[0];
+                remoteScreen.style.display = 'flex';
+                log('Remote desktop stream connected', 'success');
+                setStatus('Viewing &bull; E2EE', '#22c55e');
+            };
+            
+            if (isHost) {
+                dataChannel = pc.createDataChannel('clipboard');
+                setupDataChannel(dataChannel);
+            } else {
+                pc.ondatachannel = (e) => {
+                    dataChannel = e.channel;
+                    setupDataChannel(dataChannel);
+                };
+            }
+            if (isHost && localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+        }
+
+        function setupDataChannel(channel) {
+            channel.onopen = () => log('E2EE Data channel opened');
+            channel.onmessage = async (e) => {
+                const data = JSON.parse(e.data);
+                if (data.type === 'clipboard-sync') {
+                    if (isHost) {
+                        window.electronAPI.writeClipboard(data.text);
+                        log('Host clipboard updated from viewer');
+                    } else {
+                        // Viewer needs manual action to copy due to browser security
+                        console.log("Clipboard sync from host:", data.text);
+                    }
+                }
+            };
+        }
+
+        let lastClipboard = '';
+        setInterval(async () => {
+            if (isHost && dataChannel && dataChannel.readyState === 'open') {
+                const text = await window.electronAPI.readClipboard();
+                if (text && text !== lastClipboard) {
+                    lastClipboard = text;
+                    dataChannel.send(JSON.stringify({ type: 'clipboard-sync', text }));
+                }
+            }
+        }, 2000);
+
+        function sendFile(file) {
+            if (!file) return;
+            if (!dataChannel || dataChannel.readyState !== 'open') return log('Data channel not open. Ensure viewer is connected.', 'error');
+            log(`Sending file: ${file.name} (${file.size} bytes)...`);
+            dataChannel.send(JSON.stringify({ type: 'file-meta', name: file.name, size: file.size, fileType: file.type }));
+            
+            const reader = new FileReader();
+            let offset = 0;
+            const chunkSize = 16384; // 16KB chunks
+            
+            reader.onload = e => {
+                dataChannel.send(e.target.result);
+                offset += e.target.result.byteLength;
+                if (offset < file.size) readSlice(offset);
+                else log(`File ${file.name} sent successfully`, 'success');
+            };
+            const readSlice = o => {
+                const slice = file.slice(offset, o + chunkSize);
+                reader.readAsArrayBuffer(slice);
+            };
+            readSlice(0);
+        }
+
+        let availableSources = [];
+        window.electronAPI.getSources().then(sources => {
+            availableSources = sources;
+            const select = document.getElementById('monitorSelect');
+            sources.forEach(src => {
+                const opt = document.createElement('option');
+                opt.value = src.id;
+                opt.textContent = src.name;
+                select.appendChild(opt);
+            });
+        });
+
+        async function createAndHost() {
+            initSocket();
+            const customCode = document.getElementById('customRoomCode').value.trim().toUpperCase();
+            if (customCode) localStorage.setItem('amni-custom-code', customCode);
+            
+            const sourceId = document.getElementById('monitorSelect').value;
+            const src = availableSources.find(s => s.id === sourceId) || availableSources[0];
+
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    audio: { mandatory: { chromeMediaSource: 'desktop' } },
+                    video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: src.id, maxWidth: 1920, maxHeight: 1080, frameRate: { ideal: 30 } } }
+                });
+            } catch (err) {
+                log('Audio capture not supported or denied, falling back to video only', 'error');
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    audio: false,
+                    video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: src.id, maxWidth: 1920, maxHeight: 1080, frameRate: { ideal: 30 } } }
+                });
+            }
+            localStream.getTracks().forEach(t => t.onended = () => endSession(true));
+            isHost = true;
+            socket.emit('create-room', customCode);
+            socket.once('room-created', async (id) => {
+                roomId = id;
+                document.getElementById('activeSession').style.display = 'block';
+                document.getElementById('hostMode').style.display = 'none';
+                document.getElementById('viewerMode').style.display = 'none';
+                document.getElementById('displayCode').textContent = roomId;
+                generateQR(roomId);
+                setStatus('Hosting &bull; E2EE', '#22c55e');
+                log(`Room ${roomId} created — sharing screen: ${src.name}`, 'success');
+                socket.on('viewer-joined', async () => {
+                    log('Viewer joined — starting WebRTC offer');
+                    createPC();
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+                    socket.emit('offer', { roomId, offer });
+                });
+                socket.on('input-event', (data) => window.electronAPI.sendInputEvent(data));
+            });
+        }
+
+        async function joinSession() {
+            const code = document.getElementById('roomCodeInput').value.trim().toUpperCase();
+            if (code.length < 4) return log('Room code must be at least 4 characters', 'error');
+            initSocket();
+            isHost = false;
+            socket.emit('join-room', code);
+            socket.once('room-joined', (id) => {
+                roomId = id;
+                document.getElementById('activeSession').style.display = 'block';
+                document.getElementById('hostMode').style.display = 'none';
+                document.getElementById('viewerMode').style.display = 'none';
+                document.getElementById('displayCode').textContent = roomId;
+                setStatus('Connected &bull; E2EE', '#22c55e');
+                log('Joined — waiting for host stream...', 'success');
+                createPC();
+            });
+            socket.once('error', (msg) => log(msg, 'error'));
+        }
+
+        function copyCode() { navigator.clipboard.writeText(roomId); log('Room code copied'); }
+
+        async function copyLink() {
+            const ip = await window.electronAPI.getLocalIp();
+            const url = `http://${ip}:3389/viewer?host=${ip}&code=${roomId}`;
+            navigator.clipboard.writeText(url);
+            log(`Mobile link copied: ${url}`, 'success');
+        }
+
+        function generateQR(code) { log(`Room ${code} ready — share code or use Copy Mobile Link`); }
+
+        function endSession() {
+            if (confirm('End this session?')) location.reload();
+        }
+
+        const overlay = document.getElementById('inputOverlay');
+        overlay.addEventListener('mousemove', (e) => {
+            if (isHost || !roomId) return;
+            const r = overlay.getBoundingClientRect();
+            window.electronAPI.sendInputEvent({ type: 'mouse-move', x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height, roomId });
+        });
+        overlay.addEventListener('click', () => !isHost && roomId && window.electronAPI.sendInputEvent({ type: 'mouse-click', roomId }));
+        overlay.addEventListener('contextmenu', (e) => { e.preventDefault(); !isHost && roomId && window.electronAPI.sendInputEvent({ type: 'mouse-right-click', roomId }); });
+        document.addEventListener('keydown', (e) => !isHost && roomId && window.electronAPI.sendInputEvent({ type: 'key-down', key: e.key, roomId }));
+        document.addEventListener('keyup', (e) => !isHost && roomId && window.electronAPI.sendInputEvent({ type: 'key-up', key: e.key, roomId }));
+
+        window.electronAPI?.onStatusUpdate?.(msg => log(msg));
+        log('Amni-Connect initialized — End-to-End Encrypted', 'success');
+    </script>
+</body>
+</html>

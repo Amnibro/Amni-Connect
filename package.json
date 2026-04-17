@@ -1,0 +1,55 @@
+{
+  "name": "amni-connect",
+  "version": "1.0.0",
+  "description": "End-to-end encrypted Rust + Electron remote desktop",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "dev": "nodemon server.js",
+    "server": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "electron": "^33.2.0",
+    "express": "^4.21.2",
+    "qrcode": "^1.5.4",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "electron-builder": "^25.1.8",
+    "nodemon": "^3.1.7"
+  },
+  "build": {
+    "appId": "com.amni.connect",
+    "productName": "Amni-Connect",
+    "directories": {
+      "buildResources": "assets"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  },
+  "keywords": [
+    "remote-desktop",
+    "webrtc",
+    "rust",
+    "e2ee",
+    "electron"
+  ],
+  "author": "Amnibro (Amni-Scient) <amnibro7@gmail.com>",
+  "homepage": "https://amni-scient.com/amni-connect",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/amnibro/Amni-Connect.git"
+  },
+  "license": "SEE LICENSE IN LICENSE"
+}
