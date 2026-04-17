@@ -1,0 +1,706 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Amni-Connect Viewer</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{touch-action:manipulation}
+body{background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
+#connect-screen{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;gap:16px}
+.logo{font-size:20px;font-weight:700;color:white;margin-bottom:8px}
+.card{background:rgba(30,41,59,0.9);border:1px solid #334155;border-radius:16px;padding:24px;width:100%;max-width:400px;display:flex;flex-direction:column;gap:12px}
+label{font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px}
+input{background:#0f172a;border:2px solid #475569;border-radius:10px;color:white;font-size:16px;padding:14px 16px;width:100%;outline:none}
+input:focus{border-color:#6366f1}
+button{background:#6366f1;border:none;border-radius:10px;color:white;font-size:15px;font-weight:600;padding:14px;width:100%;cursor:pointer;transition:background .2s}
+button:active{background:#4f46e5}
+button.danger{background:#ef4444}
+#status-bar{background:rgba(15,23,42,.9);padding:10px 16px;font-size:12px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#viewer-screen{flex:1;display:none;position:relative;background:#000;overflow:auto}
+#zoom-container{width:100%;height:100%;position:relative;transform-origin:0 0;transition:transform 0.2s}
+video{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none}
+#touch-overlay{position:absolute;inset:0;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none}
+#toolbar{position:absolute;bottom:0;left:0;right:0;display:flex;gap:4px;padding:8px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);z-index:30}
+#toolbar button{flex:1;padding:8px 4px;font-size:12px;border-radius:6px;margin:0;white-space:nowrap}
+#mode-btn{background:#475569}
+#zoom-btn{background:#3b82f6}
+#kb-btn{background:#334155}
+#dc-btn{background:#ef4444}
+#keyboard-bar{position:absolute;bottom:45px;left:0;right:0;display:none;padding:8px;background:rgba(0,0,0,.92);z-index:25;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation}
+#keyboard-bar button{touch-action:manipulation}
+#kb-display{display:flex;gap:6px;margin-bottom:6px;align-items:center}
+#kb-text{flex:1;background:#1e2937;border:2px solid #475569;border-radius:8px;color:#fff;font-size:15px;padding:10px 12px;min-height:38px;max-height:72px;overflow-y:auto;font-family:monospace;word-break:break-all;white-space:pre-wrap;line-height:1.3}
+.kb-clear-btn{background:#475569;border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:600;padding:0 14px;cursor:pointer;width:72px;flex:0 0 72px;height:38px}
+#kb-keys button,#kb-mods button{width:auto}
+#kb-mods{display:flex;gap:4px;margin-bottom:5px}
+.mod-btn{background:#334155;color:#fff;border:none;border-radius:6px;padding:7px 4px;font-size:11px;font-weight:600;flex:1;cursor:pointer;transition:background .15s;min-height:32px}
+.mod-btn.active{background:#6366f1}
+#kb-keys{display:flex;flex-direction:column;gap:4px}
+.kb-row{display:flex;gap:3px;justify-content:center}
+.kb-key{flex:1;min-width:0;background:#334155;color:#fff;border:none;border-radius:6px;padding:10px 0;font-size:15px;font-weight:500;cursor:pointer;transition:background .1s;min-height:40px;-webkit-tap-highlight-color:transparent}
+.kb-key:active{background:#6366f1}
+.kb-key.kb-mod{background:#1e293b;font-size:13px;flex:1.4;font-weight:700}
+.kb-key.kb-mod.active{background:#6366f1}
+.kb-key.kb-mod.locked{background:#22c55e}
+.kb-key.kb-space{flex:5}
+#drag-indicator{display:none;position:fixed;top:12px;left:50%;transform:translateX(-50%);background:#6366f1;color:white;padding:5px 16px;border-radius:20px;font-size:12px;font-weight:700;letter-spacing:1px;pointer-events:none;z-index:200;box-shadow:0 2px 12px rgba(99,102,241,.6)}
+#toast{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.85);color:white;padding:10px 22px;border-radius:10px;font-size:14px;pointer-events:none;z-index:200;transition:opacity .35s}
+</style>
+</head>
+<body>
+
+<div id="drag-indicator">&#9654; DRAG MODE</div>
+<div id="toast"></div>
+<div id="connect-screen">
+  <div class="logo">&#128272; Amni-Connect</div>
+  <div class="card">
+    <label>Host IP / Address</label>
+    <input id="host-input" type="text" placeholder="192.168.1.x or hostname" autocomplete="off" autocorrect="off" autocapitalize="none">
+    <label>Room Code</label>
+    <input id="code-input" type="text" placeholder="Room code" maxlength="32" style="text-transform:uppercase;letter-spacing:4px;font-size:22px;font-family:monospace" autocorrect="off" autocapitalize="characters">
+    <button onclick="connect()">Connect</button>
+  </div>
+</div>
+
+<div id="status-bar">Ready</div>
+
+<div id="viewer-screen">
+  <div id="zoom-container">
+    <video id="remote-video" autoplay playsinline muted></video>
+    <div id="touch-overlay"></div>
+  </div>
+  <div id="keyboard-bar">
+    <div id="kb-display">
+      <div id="kb-text">&#8203;</div>
+      <button class="kb-clear-btn" onclick="clearKb()">Clear</button>
+    </div>
+    <div id="kb-mods">
+      <button class="mod-btn" data-mod="Ctrl">Ctrl</button>
+      <button class="mod-btn" data-mod="Alt">Alt</button>
+      <button class="mod-btn" data-mod="Meta">Win</button>
+      <button class="mod-btn" data-mod="Tab">Tab</button>
+      <button class="mod-btn" data-mod="Escape">Esc</button>
+      <button class="mod-btn" data-mod="ArrowUp">&#8593;</button>
+      <button class="mod-btn" data-mod="ArrowDown">&#8595;</button>
+      <button class="mod-btn" data-mod="ArrowLeft">&#8592;</button>
+      <button class="mod-btn" data-mod="ArrowRight">&#8594;</button>
+    </div>
+    <div id="kb-keys"></div>
+  </div>
+  <div id="clipboard-bar" style="position:absolute;bottom:45px;left:0;right:0;display:none;padding:10px;background:rgba(0,0,0,.8);z-index:20;">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;justify-content:space-between;color:#e2e8f0;font-size:12px;font-weight:600">
+        <span>Clipboard Sync</span>
+        <span onclick="toggleClipboard()" style="cursor:pointer;color:#94a3b8">&times; Close</span>
+      </div>
+      <textarea id="clip-input" rows="4" placeholder="Host clipboard will appear here. Type/paste to send back." style="width:100%;background:#1e2937;border:2px solid #475569;border-radius:8px;color:white;font-size:14px;padding:12px;outline:none;resize:none;"></textarea>
+      <button onclick="sendClipboard()" style="padding:10px;background:#22c55e">Send to Host</button>
+    </div>
+  </div>
+  <div id="toolbar">
+    <button id="mode-btn" onclick="toggleMode()">&#128433; Touch</button>
+    <button id="zoom-out" onclick="zoom(-0.2)" style="background:#3b82f6;flex:0.5">&#128269;-</button>
+    <button id="zoom-in" onclick="zoom(0.2)" style="background:#3b82f6;flex:0.5">&#128269;+</button>
+    <button id="clip-btn" onclick="toggleClipboard()" style="background:#f59e0b">📋 Clip</button>
+    <button id="kb-btn" onclick="toggleKeyboard()">&#9000; KB</button>
+    <button id="dc-btn" onclick="disconnect()">&times;</button>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const urlParams = new URLSearchParams(window.location.search);
+const savedHost = localStorage.getItem('amni-last-host');
+const savedCode = localStorage.getItem('amni-last-code');
+document.getElementById('host-input').value = urlParams.get('host') || savedHost || location.hostname || '';
+document.getElementById('code-input').value = urlParams.get('code') || savedCode || '';
+if (document.getElementById('host-input').value && document.getElementById('code-input').value.length >= 4) {
+  setTimeout(connect, 300);
+}
+
+const ICE = [{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}];
+let socket, pc, roomId;
+const statusEl = document.getElementById('status-bar');
+const setStatus = (t) => statusEl.textContent = t;
+
+function connect() {
+  const host = document.getElementById('host-input').value.trim();
+  const code = document.getElementById('code-input').value.trim().toUpperCase();
+  if (!host) return setStatus('Enter host IP or address');
+  if (code.length < 4) return setStatus('Room code must be at least 4 characters');
+  localStorage.setItem('amni-last-host', host);
+  localStorage.setItem('amni-last-code', code);
+  const port = location.port || 3389;
+  const proto = location.protocol === 'https:' ? 'https' : 'http';
+  socket = io(`${proto}://${host}:${port}`, { transports: ['websocket'] });
+  socket.on('connect', () => { setStatus('Connected to signaling server'); socket.emit('join-room', code); });
+  socket.on('connect_error', () => setStatus('Cannot reach host — check IP and ensure server is running'));
+  socket.on('room-joined', (id) => {
+    roomId = id;
+    setStatus(`Joined room ${id} — waiting for stream\u2026`);
+    document.getElementById('connect-screen').style.display = 'none';
+    document.getElementById('viewer-screen').style.display = 'flex';
+    document.getElementById('viewer-screen').style.flexDirection = 'column';
+    createPC();
+  });
+  socket.on('error', (msg) => setStatus(`Error: ${msg}`));
+  socket.on('offer', async ({ offer }) => {
+    if (!pc) createPC();
+    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    socket.emit('answer', { roomId, answer });
+    setStatus('WebRTC negotiating\u2026');
+  });
+  socket.on('answer', async ({ answer }) => pc?.setRemoteDescription(new RTCSessionDescription(answer)));
+  socket.on('ice-candidate', ({ candidate }) => pc?.addIceCandidate(new RTCIceCandidate(candidate)).catch(()=>{}));
+  socket.on('host-disconnected', () => { setStatus('Host disconnected'); disconnect(); });
+}
+
+let dataChannel;
+let incomingFile = null, incomingBuffers = [], incomingSize = 0;
+
+function createPC() {
+  pc = new RTCPeerConnection({ iceServers: ICE });
+  pc.onicecandidate = ({ candidate }) => candidate && socket.emit('ice-candidate', { roomId, candidate });
+  pc.onconnectionstatechange = () => setStatus(`WebRTC: ${pc.connectionState}`);
+  pc.ontrack = ({ streams }) => {
+    const v = document.getElementById('remote-video');
+    v.srcObject = streams[0];
+    v.play().catch(()=>{});
+    setStatus('Streaming \u25cf Live');
+  };
+  pc.ondatachannel = (e) => {
+    dataChannel = e.channel;
+    dataChannel.onopen = () => setStatus('WebRTC: connected (Data+Video)');
+    dataChannel.onmessage = (ev) => {
+      if (typeof ev.data === 'string') {
+        const data = JSON.parse(ev.data);
+        if (data.type === 'clipboard-sync') {
+          const clipInput = document.getElementById('clip-input');
+          if (clipInput.value !== data.text) {
+            clipInput.value = data.text;
+            try { navigator.clipboard.writeText(data.text).catch(()=>{}); } catch(e){}
+          }
+        } else if (data.type === 'file-meta') {
+          incomingFile = data; incomingBuffers = []; incomingSize = 0;
+          setStatus(`Receiving ${data.name}...`);
+        }
+      } else if (incomingFile) {
+        incomingBuffers.push(ev.data);
+        incomingSize += ev.data.byteLength;
+        if (incomingSize >= incomingFile.size) {
+          const blob = new Blob(incomingBuffers, { type: incomingFile.fileType });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a'); a.href = url; a.download = incomingFile.name; a.click();
+          setStatus('Streaming \u25cf Live');
+          incomingFile = null;
+        }
+      }
+    };
+  };
+}
+
+function sendInput(event) { socket?.emit('input-event', { ...event, roomId }); }
+
+// ── Visual feedback ──────────────────────────────────────────────────────────
+const dragIndicator = document.getElementById('drag-indicator');
+const toastEl = document.getElementById('toast');
+let toastTimer = null;
+function showToast(msg) {
+  toastEl.textContent = msg;
+  toastEl.style.display = 'block';
+  toastEl.style.opacity = '1';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastEl.style.opacity = '0'; setTimeout(() => toastEl.style.display = 'none', 380); }, 900);
+}
+function setDragMode(on) {
+  dragIndicator.style.display = on ? 'block' : 'none';
+}
+
+// ── View state ───────────────────────────────────────────────────────────────
+const overlay = document.getElementById('touch-overlay');
+let panX = 0, panY = 0, currentZoom = 1;
+
+function getVideoRect() {
+  const v = document.getElementById('remote-video');
+  const vw = v.videoWidth, vh = v.videoHeight;
+  const r = overlay.getBoundingClientRect();
+  if (!vw || !vh) return { left: r.left, top: r.top, width: r.width, height: r.height };
+  const cAR = r.width / r.height, vAR = vw / vh;
+  const dW = vAR > cAR ? r.width : r.height * vAR;
+  const dH = vAR > cAR ? r.width / vAR : r.height;
+  return { left: r.left + (r.width - dW) / 2, top: r.top + (r.height - dH) / 2, width: dW, height: dH };
+}
+
+function screenCoord(clientX, clientY) {
+  const vr = getVideoRect();
+  return {
+    x: Math.max(0, Math.min(1, (clientX - vr.left) / vr.width)),
+    y: Math.max(0, Math.min(1, (clientY - vr.top)  / vr.height))
+  };
+}
+
+function clampPan() {
+  const vw = overlay.clientWidth, vh = overlay.clientHeight;
+  panX = Math.min(0, Math.max(vw - vw * currentZoom, panX));
+  panY = Math.min(0, Math.max(vh - vh * currentZoom, panY));
+}
+
+function applyTransform(instant) {
+  const c = document.getElementById('zoom-container');
+  c.style.transition = instant ? 'none' : 'transform 0.15s';
+  c.style.transform = `translate(${panX}px,${panY}px) scale(${currentZoom})`;
+}
+
+// ── Toolbar zoom — anchored to viewport center ────────────────────────────────
+function zoom(delta) {
+  const prev = currentZoom;
+  currentZoom = Math.max(0.5, Math.min(4, currentZoom + delta));
+  if (currentZoom !== prev) {
+    const vw = overlay.clientWidth, vh = overlay.clientHeight;
+    panX = vw / 2 - (vw / 2 - panX) * (currentZoom / prev);
+    panY = vh / 2 - (vh / 2 - panY) * (currentZoom / prev);
+    clampPan(); applyTransform(false);
+  }
+}
+
+// ── Touch gesture state ──────────────────────────────────────────────────────
+const LONG_PRESS_MS  = 520;   // ms hold → right click
+const DOUBLE_TAP_MS  = 300;   // ms between taps for double-tap
+const DOUBLE_TAP_PX  = 38;    // max distance between taps
+const DRAG_THRESHOLD = 9;     // px before a move counts as a drag
+
+let lastTouch = null, touchStartPos = null, isDragging = false;
+let pinchLast = null, pinchMoved = false;
+let triLast = null;
+let maxTouchCount = 0;
+
+// Long-press → right-click
+let longPressTimer = null;
+
+// Double-tap-hold → drag lock
+let lastTapTime = 0, lastTapPos = null;
+let isDragLock = false, dragLockActive = false;
+
+let touchMode = 'touch';
+
+// ── touchstart ───────────────────────────────────────────────────────────────
+overlay.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  maxTouchCount = Math.max(maxTouchCount, e.touches.length);
+
+  if (e.touches.length === 2) {
+    // Cancel any single-finger state
+    clearTimeout(longPressTimer); longPressTimer = null;
+    if (isDragLock && dragLockActive) {
+      sendInput({ type: 'mouse-up' }); setDragMode(false);
+      isDragLock = false; dragLockActive = false;
+    }
+    const t0 = e.touches[0], t1 = e.touches[1];
+    const cx = (t0.clientX + t1.clientX) / 2;
+    const cy = (t0.clientY + t1.clientY) / 2;
+    pinchLast = { dist: Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY), cx, cy };
+    pinchMoved = false;
+    lastTouch = null; isDragging = false;
+    return;
+  }
+
+  if (e.touches.length >= 3) {
+    clearTimeout(longPressTimer); longPressTimer = null;
+    if (isDragLock && dragLockActive) {
+      sendInput({ type: 'mouse-up' }); setDragMode(false);
+      isDragLock = false; dragLockActive = false;
+    }
+    let cx = 0, cy = 0;
+    for (let i = 0; i < e.touches.length; i++) { cx += e.touches[i].clientX; cy += e.touches[i].clientY; }
+    cx /= e.touches.length; cy /= e.touches.length;
+    triLast = { cx, cy };
+    pinchLast = null; lastTouch = null; isDragging = false;
+    return;
+  }
+
+  // Single finger
+  pinchLast = null;
+  const t = e.touches[0];
+  touchStartPos = { x: t.clientX, y: t.clientY };
+  lastTouch = t;
+  isDragging = false;
+
+  // Detect second tap of a double-tap (for drag lock)
+  const now = Date.now();
+  if (!isDragLock && lastTapPos &&
+      now - lastTapTime < DOUBLE_TAP_MS &&
+      Math.hypot(t.clientX - lastTapPos.x, t.clientY - lastTapPos.y) < DOUBLE_TAP_PX) {
+    isDragLock = true; dragLockActive = false;
+    lastTapTime = 0; lastTapPos = null;
+    return; // skip long-press setup
+  }
+
+  // Long press → right click
+  longPressTimer = setTimeout(() => {
+    longPressTimer = null;
+    if (!isDragging && touchStartPos && !isDragLock) {
+      if (touchMode !== 'trackpad') {
+        const sc = screenCoord(touchStartPos.x, touchStartPos.y);
+        sendInput({ type: 'mouse-move', x: sc.x, y: sc.y });
+      }
+      sendInput({ type: 'mouse-right-click' });
+      showToast('Right Click');
+      touchStartPos = null; // suppress tap on release
+    }
+  }, LONG_PRESS_MS);
+}, { passive: false });
+
+// ── touchmove ────────────────────────────────────────────────────────────────
+overlay.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+
+  // ── Three-finger: scroll host (works at any zoom) ────────────────────────
+  if (e.touches.length >= 3 && triLast) {
+    let cx = 0, cy = 0;
+    for (let i = 0; i < e.touches.length; i++) { cx += e.touches[i].clientX; cy += e.touches[i].clientY; }
+    cx /= e.touches.length; cy /= e.touches.length;
+    const dcx = cx - triLast.cx, dcy = cy - triLast.cy;
+    if (Math.abs(dcx) > 1 || Math.abs(dcy) > 1) pinchMoved = true;
+    const sx = Math.round(dcx / 18), sy = Math.round(dcy / 18);
+    if (sx !== 0 || sy !== 0) {
+      sendInput({ type: 'mouse-scroll', dx: sx, dy: sy });
+      triLast = { cx, cy };
+    }
+    return;
+  }
+
+  // ── Two-finger: exactly one of {zoom, pan, scroll} per frame ─────────────
+  if (e.touches.length === 2 && pinchLast) {
+    const t0 = e.touches[0], t1 = e.touches[1];
+    const cx = (t0.clientX + t1.clientX) / 2;
+    const cy = (t0.clientY + t1.clientY) / 2;
+    const newDist = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
+    const dcx = cx - pinchLast.cx;
+    const dcy = cy - pinchLast.cy;
+    const scaleRatio = newDist / pinchLast.dist;
+    const isZooming = Math.abs(scaleRatio - 1) > 0.025;
+
+    if (Math.abs(dcx) > 1 || Math.abs(dcy) > 1 || isZooming) pinchMoved = true;
+
+    if (isZooming) {
+      const prev = currentZoom;
+      currentZoom = Math.max(0.5, Math.min(4, currentZoom * scaleRatio));
+      panX = cx - (cx - panX) * (currentZoom / prev);
+      panY = cy - (cy - panY) * (currentZoom / prev);
+    } else if (currentZoom > 1.05) {
+      panX += dcx; panY += dcy;
+    } else {
+      const sx = Math.round(dcx / 22), sy = Math.round(dcy / 22);
+      if (sx !== 0 || sy !== 0) sendInput({ type: 'mouse-scroll', dx: sx, dy: sy });
+    }
+    clampPan(); applyTransform(true);
+    pinchLast = { dist: newDist, cx, cy };
+    return;
+  }
+
+  if (!lastTouch || e.touches.length !== 1) return;
+  const t = e.touches[0];
+  const pxDx = t.clientX - lastTouch.clientX;
+  const pxDy = t.clientY - lastTouch.clientY;
+
+  if (!isDragging && touchStartPos &&
+      Math.hypot(t.clientX - touchStartPos.x, t.clientY - touchStartPos.y) > DRAG_THRESHOLD) {
+    isDragging = true;
+    clearTimeout(longPressTimer); longPressTimer = null;
+  }
+
+  // ── Drag lock: button held while moving ───────────────────────────────────
+  if (isDragLock) {
+    if (!dragLockActive && isDragging) {
+      // First confirmed movement: press and hold mouse button
+      if (touchMode !== 'trackpad') {
+        const sc = screenCoord(touchStartPos.x, touchStartPos.y);
+        sendInput({ type: 'mouse-move', x: sc.x, y: sc.y });
+      }
+      sendInput({ type: 'mouse-down' });
+      dragLockActive = true; setDragMode(true);
+    }
+    if (dragLockActive) {
+      if (touchMode === 'trackpad') {
+        const vr = getVideoRect();
+        sendInput({ type: 'mouse-move-rel', dx: pxDx / vr.width, dy: pxDy / vr.height });
+      } else {
+        const sc = screenCoord(t.clientX, t.clientY);
+        sendInput({ type: 'mouse-move', x: sc.x, y: sc.y });
+      }
+    }
+    lastTouch = t; return;
+  }
+
+  // ── Normal single-finger move ─────────────────────────────────────────────
+  if (touchMode === 'trackpad') {
+    const vr = getVideoRect();
+    sendInput({ type: 'mouse-move-rel', dx: pxDx / vr.width, dy: pxDy / vr.height });
+  } else if (currentZoom > 1.05) {
+    panX += pxDx; panY += pxDy; clampPan(); applyTransform(true);
+  } else {
+    const sc = screenCoord(t.clientX, t.clientY);
+    sendInput({ type: 'mouse-move', x: sc.x, y: sc.y });
+  }
+  lastTouch = t;
+}, { passive: false });
+
+// ── touchend ─────────────────────────────────────────────────────────────────
+overlay.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  const allUp = e.touches.length === 0;
+
+  // Transitioning from multi to single touch — reset pinch but keep single-touch going
+  if (!allUp && (pinchLast !== null || triLast !== null)) {
+    pinchLast = null; triLast = null;
+    // pinchMoved intentionally NOT reset here — kept for allUp tap detection
+    if (e.touches.length === 1) { lastTouch = e.touches[0]; touchStartPos = { x: lastTouch.clientX, y: lastTouch.clientY }; isDragging = false; }
+    else if (e.touches.length === 2) {
+      const t0 = e.touches[0], t1 = e.touches[1];
+      pinchLast = { dist: Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY), cx: (t0.clientX + t1.clientX) / 2, cy: (t0.clientY + t1.clientY) / 2 };
+    }
+    return;
+  }
+
+  // ── All fingers lifted: check for multi-finger tap gestures ──────────────
+  if (allUp && maxTouchCount >= 2) {
+    const savedCount = maxTouchCount;
+    const savedMoved = pinchMoved;
+    pinchLast = null; triLast = null; pinchMoved = false; maxTouchCount = 0;
+    lastTouch = null; touchStartPos = null; isDragging = false;
+    if (!savedMoved) {
+      if (savedCount >= 3) { sendInput({ type: 'mouse-middle-click' }); showToast('Middle Click'); }
+      else                 { sendInput({ type: 'mouse-right-click'  }); showToast('Right Click');  }
+    }
+    return;
+  }
+
+  clearTimeout(longPressTimer); longPressTimer = null;
+
+  // ── End drag lock ─────────────────────────────────────────────────────────
+  if (isDragLock) {
+    if (dragLockActive) {
+      sendInput({ type: 'mouse-up' }); setDragMode(false);
+    } else if (!isDragging && touchStartPos) {
+      // Second tap released quickly without drag → treat as normal click
+      if (touchMode !== 'trackpad') {
+        const sc = screenCoord(touchStartPos.x, touchStartPos.y);
+        sendInput({ type: 'mouse-move', x: sc.x, y: sc.y });
+      }
+      sendInput({ type: 'mouse-click' });
+    }
+    isDragLock = false; dragLockActive = false;
+    lastTouch = null; touchStartPos = null; isDragging = false;
+    maxTouchCount = 0; return;
+  }
+
+  // ── Normal tap ────────────────────────────────────────────────────────────
+  if (!isDragging && touchStartPos) {
+    lastTapTime = Date.now();
+    lastTapPos = { x: touchStartPos.x, y: touchStartPos.y };
+    if (touchMode === 'trackpad') {
+      sendInput({ type: 'mouse-click' });
+    } else {
+      const sc = screenCoord(touchStartPos.x, touchStartPos.y);
+      sendInput({ type: 'mouse-move', x: sc.x, y: sc.y });
+      sendInput({ type: 'mouse-click' });
+    }
+  }
+
+  lastTouch = null; touchStartPos = null; isDragging = false; maxTouchCount = 0;
+}, { passive: false });
+
+overlay.addEventListener('contextmenu', (e) => { e.preventDefault(); sendInput({ type: 'mouse-right-click' }); });
+
+const KB_ROWS_LOWER = ['1234567890', 'qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
+const KB_ROWS_UPPER = ['!@#$%^&*()', 'QWERTYUIOP', 'ASDFGHJKL', 'ZXCVBNM'];
+const KB_ROWS_SYM   = ['1234567890', '-_=+[]{}\\|', ';:\'",.<>/?', '`~!@#$%^&*'];
+const kbTextEl = document.getElementById('kb-text');
+const kbKeysEl = document.getElementById('kb-keys');
+let kbShift = false, kbCaps = false, kbLayout = 'abc';
+let kbMods = { Ctrl: false, Alt: false, Meta: false };
+let kbBuffer = '';
+
+function renderKbText() {
+  kbTextEl.textContent = kbBuffer || '\u200b';
+  kbTextEl.scrollTop = kbTextEl.scrollHeight;
+}
+
+function renderKbMods() {
+  document.querySelectorAll('#kb-mods .mod-btn').forEach(b => {
+    const m = b.dataset.mod;
+    b.classList.toggle('active', !!kbMods[m]);
+  });
+}
+
+function bindPress(el, fn) {
+  let fired = false;
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    if (fired) return;
+    fired = true;
+    fn();
+    setTimeout(() => { fired = false; }, 40);
+  });
+  el.addEventListener('click', (e) => e.preventDefault());
+}
+
+function renderKbKeys() {
+  const rows = kbLayout === 'sym' ? KB_ROWS_SYM : (kbShift || kbCaps ? KB_ROWS_UPPER : KB_ROWS_LOWER);
+  kbKeysEl.innerHTML = '';
+  rows.forEach((row, idx) => {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'kb-row';
+    if (idx === 3) {
+      const sh = document.createElement('button');
+      sh.className = 'kb-key kb-mod' + (kbCaps ? ' locked' : kbShift ? ' active' : '');
+      sh.textContent = kbCaps ? 'CAPS' : '\u21E7';
+      bindPress(sh, toggleShift);
+      rowEl.appendChild(sh);
+    }
+    for (const ch of row) {
+      const b = document.createElement('button');
+      b.className = 'kb-key';
+      b.textContent = ch;
+      bindPress(b, () => tapChar(ch));
+      rowEl.appendChild(b);
+    }
+    if (idx === 3) {
+      const bk = document.createElement('button');
+      bk.className = 'kb-key kb-mod';
+      bk.textContent = '\u232B';
+      bindPress(bk, () => tapSpecial('Backspace'));
+      rowEl.appendChild(bk);
+    }
+    kbKeysEl.appendChild(rowEl);
+  });
+  const lastRow = document.createElement('div');
+  lastRow.className = 'kb-row';
+  const lay = document.createElement('button');
+  lay.className = 'kb-key kb-mod';
+  lay.textContent = kbLayout === 'sym' ? 'ABC' : '!#1';
+  bindPress(lay, toggleLayout);
+  const sp = document.createElement('button');
+  sp.className = 'kb-key kb-space';
+  sp.textContent = 'space';
+  bindPress(sp, () => tapChar(' '));
+  const en = document.createElement('button');
+  en.className = 'kb-key kb-mod';
+  en.textContent = '\u23CE';
+  bindPress(en, () => tapSpecial('Enter'));
+  lastRow.appendChild(lay);
+  lastRow.appendChild(sp);
+  lastRow.appendChild(en);
+  kbKeysEl.appendChild(lastRow);
+}
+
+function activeMods() {
+  return Object.keys(kbMods).filter(k => kbMods[k]);
+}
+
+const SHIFTED_SYMBOLS = {'!':'1','@':'2','#':'3','$':'4','%':'5','^':'6','&':'7','*':'8','(':'9',')':'0','_':'-','+':'=','{':'[','}':']','|':'\\',':':';','"':"'",'<':',','>':'.','?':'/','~':'`'};
+
+function sendWithMods(key, withShift) {
+  const mods = activeMods();
+  let realKey = key;
+  let autoShift = false;
+  if (SHIFTED_SYMBOLS[key]) { realKey = SHIFTED_SYMBOLS[key]; autoShift = true; }
+  else if (key.length === 1 && key >= 'A' && key <= 'Z') { realKey = key.toLowerCase(); autoShift = true; }
+  if ((withShift && (kbShift || kbCaps)) || autoShift) {
+    if (!mods.includes('Shift')) mods.push('Shift');
+  }
+  mods.forEach(m => sendInput({ type: 'key-down', key: m }));
+  sendInput({ type: 'key-down', key: realKey });
+  sendInput({ type: 'key-up', key: realKey });
+  mods.slice().reverse().forEach(m => sendInput({ type: 'key-up', key: m }));
+  const hadStickyMods = activeMods().length > 0;
+  if (hadStickyMods) {
+    Object.keys(kbMods).forEach(m => kbMods[m] = false);
+    renderKbMods();
+  }
+}
+
+function tapChar(ch) {
+  let out = ch;
+  if (kbLayout !== 'sym' && /[a-z]/.test(ch) && (kbShift || kbCaps)) out = ch.toUpperCase();
+  sendWithMods(out, false);
+  kbBuffer += out;
+  renderKbText();
+  if (kbShift && !kbCaps) { kbShift = false; renderKbKeys(); }
+}
+
+function tapSpecial(key) {
+  sendWithMods(key, true);
+  if (kbShift && !kbCaps) { kbShift = false; renderKbKeys(); }
+  if (key === 'Backspace') kbBuffer = kbBuffer.slice(0, -1);
+  else if (key === 'Enter') kbBuffer = '';
+  renderKbText();
+}
+
+function toggleShift() {
+  kbCaps ? (kbCaps = false, kbShift = false) : kbShift ? (kbShift = false, kbCaps = true) : (kbShift = true);
+  renderKbKeys();
+}
+
+function toggleLayout() {
+  kbLayout = kbLayout === 'sym' ? 'abc' : 'sym';
+  renderKbKeys();
+}
+
+function clearKb() {
+  activeMods().forEach(m => sendInput({ type: 'key-up', key: m }));
+  kbBuffer = ''; kbShift = false; kbCaps = false;
+  kbMods = { Ctrl: false, Alt: false, Meta: false };
+  renderKbText(); renderKbMods(); renderKbKeys();
+}
+
+document.querySelectorAll('#kb-mods .mod-btn').forEach(btn => {
+  bindPress(btn, () => {
+    const m = btn.dataset.mod;
+    if (m in kbMods) { kbMods[m] = !kbMods[m]; renderKbMods(); }
+    else tapSpecial(m);
+  });
+});
+const kbClearBtn = document.querySelector('.kb-clear-btn');
+if (kbClearBtn) { kbClearBtn.onclick = null; bindPress(kbClearBtn, clearKb); }
+
+function toggleKeyboard() {
+  const bar = document.getElementById('keyboard-bar');
+  const visible = bar.style.display === 'block';
+  bar.style.display = visible ? 'none' : 'block';
+  if (!visible) { renderKbKeys(); renderKbText(); renderKbMods(); }
+}
+
+function toggleClipboard() {
+  const bar = document.getElementById('clipboard-bar');
+  bar.style.display = bar.style.display === 'block' ? 'none' : 'block';
+}
+
+function sendClipboard() {
+  if (dataChannel && dataChannel.readyState === 'open') {
+    const text = document.getElementById('clip-input').value;
+    dataChannel.send(JSON.stringify({ type: 'clipboard-sync', text }));
+    try { navigator.clipboard.writeText(text).catch(()=>{}); } catch(e){}
+  }
+}
+
+function disconnect() {
+  pc?.close(); socket?.disconnect();
+  document.getElementById('viewer-screen').style.display = 'none';
+  document.getElementById('connect-screen').style.display = 'flex';
+  setStatus('Disconnected');
+}
+
+function toggleMode() {
+  touchMode = touchMode === 'touch' ? 'trackpad' : 'touch';
+  document.getElementById('mode-btn').textContent = touchMode === 'touch' ? '\uD83D\uDDB1\uFE0F Touch' : '\uD83D\uDD32 Pad';
+}
+</script>
+</body>
+</html>

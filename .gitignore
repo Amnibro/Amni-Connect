@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+package-lock.json.backup
+
+# Rust build artifacts
+rust/target/
+rust/Cargo.lock
+
+# Environment & secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Electron build output
+dist/
+build/
+out/
+*.exe
+*.dmg
+*.AppImage
+*.deb
+*.snap
+*.zip
+
+# Dev-only scratch
+backups/
+*.bak
+*.log
+*.tmp
+tmp_*.py
+tmp_*.txt
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python helper scripts (local dev)
+server.py
+__pycache__/
+*.pyc
