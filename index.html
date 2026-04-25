@@ -7,23 +7,55 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
         :root { --primary: #6366f1; --primary-dark: #4f46e5; }
+        * { box-sizing: border-box; }
         body { margin: 0; font-family: 'Inter', system-ui, sans-serif; background: linear-gradient(135deg, #1e2937, #0f172a); color: #e2e8f0; height: 100vh; overflow: hidden; }
         .container { display: flex; flex-direction: column; height: 100vh; }
-        header { background: rgba(15,23,42,0.8); padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #334155; backdrop-filter: blur(12px); }
-        .logo { font-size: 22px; font-weight: 700; color: white; display: flex; align-items: center; gap: 10px; }
-        .status { padding: 8px 20px; border-radius: 9999px; font-size: 13px; font-weight: 500; }
-        .main { flex: 1; display: flex; padding: 32px; gap: 32px; overflow: hidden; }
-        .panel { background: rgba(15,23,42,0.6); border-radius: 16px; padding: 28px; border: 1px solid #334155; backdrop-filter: blur(12px); min-width: 320px; }
-        h2 { margin: 0 0 20px 0; color: #94a3b8; font-size: 15px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
-        input { width: 100%; padding: 16px; background: #1e2937; border: 2px solid #475569; border-radius: 12px; color: white; font-size: 18px; margin-bottom: 16px; box-sizing: border-box; }
-        button { width: 100%; padding: 14px; background: var(--primary); color: white; border: none; border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s; margin-bottom: 12px; }
-        button:hover { background: var(--primary-dark); transform: translateY(-1px); }
+        header { flex-shrink: 0; background: rgba(15,23,42,0.8); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #334155; backdrop-filter: blur(12px); }
+        .logo { font-size: 20px; font-weight: 700; color: white; display: flex; align-items: center; gap: 10px; }
+        .status { padding: 6px 16px; border-radius: 9999px; font-size: 13px; font-weight: 500; background: #64748b; }
+        .main { flex: 1; display: flex; padding: 20px; gap: 20px; overflow: hidden; min-height: 0; }
+        .panel { background: rgba(15,23,42,0.6); border-radius: 14px; padding: 20px; border: 1px solid #334155; backdrop-filter: blur(12px); width: 320px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+        .panel-scroll { flex: 1; overflow-y: auto; min-height: 0; scrollbar-width: thin; scrollbar-color: #334155 transparent; }
+        .panel-scroll::-webkit-scrollbar { width: 4px; }
+        .panel-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        h2 { margin: 0 0 14px 0; color: #94a3b8; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; display: flex; align-items: center; gap: 6px; }
+        h2.section-head { margin-top: 20px; padding-top: 16px; border-top: 1px solid #1e293b; }
+        input, select { width: 100%; padding: 11px 14px; background: #1e2937; border: 1.5px solid #475569; border-radius: 10px; color: white; font-size: 14px; margin-bottom: 10px; outline: none; font-family: inherit; }
+        input:focus, select:focus { border-color: #6366f1; }
+        select option { background: #1e2937; }
+        button { width: 100%; padding: 11px 14px; background: var(--primary); color: white; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.2s; margin-bottom: 10px; }
+        button:hover { background: var(--primary-dark); }
         button.danger { background: #ef4444; }
-        #remoteScreen { flex: 1; background: #000; border-radius: 16px; overflow: hidden; position: relative; border: 1px solid #334155; display: none; }
+        button.success { background: #22c55e; }
+        button.info { background: #3b82f6; }
+        button.muted { background: #475569; }
+        .btn-row { display: flex; gap: 8px; }
+        .btn-row button { flex: 1; }
+        #remoteScreen { flex: 1; background: #000; border-radius: 14px; overflow: hidden; position: relative; border: 1px solid #334155; display: none; }
         #remoteScreen video { width: 100%; height: 100%; object-fit: contain; }
         .overlay { position: absolute; inset: 0; pointer-events: none; }
-        .room-code { font-family: monospace; font-size: 32px; letter-spacing: 4px; background: #1e2937; padding: 16px 24px; border-radius: 12px; text-align: center; margin: 20px 0; color: #a5b4fc; }
-        .log { font-size: 12px; background: #0f172a; padding: 16px; border-radius: 8px; height: 160px; overflow-y: auto; font-family: monospace; line-height: 1.5; }
+        .room-code { font-family: monospace; font-size: 26px; letter-spacing: 4px; background: #1e2937; padding: 12px 16px; border-radius: 10px; text-align: center; margin: 12px 0; color: #a5b4fc; border: 1.5px solid #334155; }
+        .log-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+        .log { font-size: 11px; background: #0a0f1a; padding: 10px 12px; border-radius: 8px; flex: 1; overflow-y: auto; font-family: monospace; line-height: 1.6; min-height: 80px; scrollbar-width: thin; scrollbar-color: #334155 transparent; }
+        .log::-webkit-scrollbar { width: 4px; }
+        .log::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        .setting-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px; }
+        .setting-row label { font-size: 12px; color: #94a3b8; font-weight: 500; flex-shrink: 0; }
+        .setting-row select, .setting-row input[type=range] { margin-bottom: 0; flex: 1; }
+        .setting-row input[type=range] { padding: 0; border: none; background: transparent; accent-color: #6366f1; }
+        .quality-val { font-size: 12px; color: #a5b4fc; min-width: 44px; text-align: right; }
+        .toggle-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+        .toggle-row label { font-size: 12px; color: #94a3b8; font-weight: 500; }
+        .toggle { position: relative; width: 38px; height: 22px; }
+        .toggle input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; inset: 0; background: #334155; border-radius: 22px; cursor: pointer; transition: background 0.2s; }
+        .slider:before { content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: white; border-radius: 50%; transition: transform 0.2s; }
+        .toggle input:checked + .slider { background: #6366f1; }
+        .toggle input:checked + .slider:before { transform: translateX(16px); }
+        .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+        .stat-box { background: #0a0f1a; border-radius: 8px; padding: 8px 10px; }
+        .stat-box .stat-label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-box .stat-val { font-size: 14px; font-weight: 600; color: #e2e8f0; margin-top: 2px; }
     </style>
 </head>
 <body>
@@ -34,24 +66,77 @@
         </header>
         <div class="main">
             <div class="panel">
-                <h2>Session Control</h2>
-                <div id="hostMode">
-                    <input type="text" id="customRoomCode" placeholder="Optional: Persistent Room Code" style="text-transform:uppercase">
-                    <select id="monitorSelect" style="width: 100%; padding: 14px; background: #1e2937; border: 2px solid #475569; border-radius: 12px; color: white; font-size: 16px; margin-bottom: 16px; outline: none;"></select>
-                    <button onclick="createAndHost()">&#128640; Start Hosting (Share Screen)</button>
+                <div class="panel-scroll">
+                    <h2>&#128640; Session Control</h2>
+                    <div id="hostMode">
+                        <input type="text" id="customRoomCode" placeholder="Optional: Persistent Room Code" style="text-transform:uppercase">
+                        <select id="monitorSelect"></select>
+                        <button onclick="createAndHost()">&#128640; Start Hosting (Share Screen)</button>
+                    </div>
+                    <div id="viewerMode">
+                        <input type="text" id="roomCodeInput" placeholder="Enter Room Code" maxlength="32" style="text-transform:uppercase">
+                        <button onclick="joinSession()">&#128279; Join Remote Session</button>
+                    </div>
+                    <div id="activeSession" style="display:none;">
+                        <div class="room-code" id="displayCode">———</div>
+                        <div class="btn-row">
+                            <button class="success" onclick="copyCode()">&#128203; Code</button>
+                            <button class="info" onclick="copyLink()">&#128279; Link</button>
+                        </div>
+                        <button class="danger" onclick="endSession()">&#9940; End Session</button>
+                    </div>
+
+                    <h2 class="section-head">&#9881;&#65039; Stream Settings</h2>
+                    <div class="setting-row">
+                        <label>Resolution</label>
+                        <select id="resolutionSelect" onchange="applyStreamSettings()">
+                            <option value="source">Source (native)</option>
+                            <option value="1920x1080" selected>1080p — 1920×1080</option>
+                            <option value="1280x720">720p — 1280×720</option>
+                            <option value="2560x1440">1440p — 2560×1440</option>
+                            <option value="3840x2160">4K — 3840×2160</option>
+                        </select>
+                    </div>
+                    <div class="setting-row">
+                        <label>Frame Rate</label>
+                        <select id="fpsSelect" onchange="applyStreamSettings()">
+                            <option value="60">60 fps</option>
+                            <option value="30" selected>30 fps</option>
+                            <option value="24">24 fps</option>
+                            <option value="15">15 fps</option>
+                        </select>
+                    </div>
+                    <div class="setting-row">
+                        <label>Quality</label>
+                        <input type="range" id="qualitySlider" min="500" max="20000" step="500" value="8000" oninput="updateQualityLabel();applyBitrate()">
+                        <span class="quality-val" id="qualityLabel">8 Mbps</span>
+                    </div>
+                    <div class="toggle-row">
+                        <label>Audio</label>
+                        <label class="toggle"><input type="checkbox" id="audioToggle" checked onchange="applyStreamSettings()"><span class="slider"></span></label>
+                    </div>
+                    <div class="toggle-row">
+                        <label>Lock Viewer Input</label>
+                        <label class="toggle"><input type="checkbox" id="lockInputToggle" onchange="toggleInputLock()"><span class="slider"></span></label>
+                    </div>
+                    <div class="toggle-row">
+                        <label>View Only (this side)</label>
+                        <label class="toggle"><input type="checkbox" id="viewOnlyToggle"><span class="slider"></span></label>
+                    </div>
+
+                    <h2 class="section-head">&#128202; Connection Stats</h2>
+                    <div class="stat-grid">
+                        <div class="stat-box"><div class="stat-label">Bitrate</div><div class="stat-val" id="statBitrate">—</div></div>
+                        <div class="stat-box"><div class="stat-label">FPS</div><div class="stat-val" id="statFps">—</div></div>
+                        <div class="stat-box"><div class="stat-label">Latency</div><div class="stat-val" id="statLatency">—</div></div>
+                        <div class="stat-box"><div class="stat-label">Resolution</div><div class="stat-val" id="statRes">—</div></div>
+                    </div>
                 </div>
-                <div id="viewerMode">
-                    <input type="text" id="roomCodeInput" placeholder="Enter Room Code" maxlength="32" style="text-transform:uppercase">
-                    <button onclick="joinSession()">🔗 Join Remote Session</button>
+
+                <div class="log-wrap">
+                    <h2 style="margin-top:16px;margin-bottom:8px;">&#128196; Connection Log</h2>
+                    <div id="log" class="log"></div>
                 </div>
-                <div id="activeSession" style="display:none;">
-                    <div class="room-code" id="displayCode">———</div>
-                    <button onclick="copyCode()" style="background:#22c55e">📋 Copy Code</button>
-                    <button onclick="copyLink()" style="background:#3b82f6">🔗 Copy Mobile Link</button>
-                    <button onclick="endSession()" class="danger">⛔ End Session</button>
-                </div>
-                <h2 style="margin-top:32px">Connection Log</h2>
-                <div id="log" class="log"></div>
             </div>
             <div id="remoteScreen">
                 <video id="remoteVideo" autoplay playsinline></video>
@@ -64,7 +149,7 @@
     <script>
         const SIGNALING_URL = 'http://localhost:3389';
         const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
-        let socket, pc, localStream, roomId, isHost = false;
+        let socket, pc, localStream, roomId, isHost = false, inputLocked = false;
         const logEl = document.getElementById('log');
         const statusEl = document.getElementById('status');
         const remoteScreen = document.getElementById('remoteScreen');
@@ -79,6 +164,49 @@
         function setStatus(text, color = '#64748b') {
             statusEl.textContent = text;
             statusEl.style.background = color;
+        }
+
+        function updateQualityLabel() {
+            const v = parseInt(document.getElementById('qualitySlider').value);
+            document.getElementById('qualityLabel').textContent = v >= 1000 ? (v / 1000).toFixed(v % 1000 ? 1 : 0) + ' Mbps' : v + ' Kbps';
+        }
+        updateQualityLabel();
+
+        function getResolution() {
+            const v = document.getElementById('resolutionSelect').value;
+            if (v === 'source') return null;
+            const [w, h] = v.split('x').map(Number);
+            return { width: w, height: h };
+        }
+
+        async function applyStreamSettings() {
+            if (!localStream) return;
+            const res = getResolution();
+            const fps = parseInt(document.getElementById('fpsSelect').value);
+            const audioOn = document.getElementById('audioToggle').checked;
+            const constraints = { frameRate: { ideal: fps } };
+            if (res) { constraints.width = { ideal: res.width }; constraints.height = { ideal: res.height }; }
+            const vt = localStream.getVideoTracks()[0];
+            if (vt) { try { await vt.applyConstraints(constraints); log(`Stream: ${res ? res.width + '×' + res.height : 'native'} @ ${fps}fps`); } catch(e) { log('Constraint apply failed: ' + e.message, 'error'); } }
+            localStream.getAudioTracks().forEach(t => { t.enabled = audioOn; });
+            applyBitrate();
+        }
+
+        function applyBitrate() {
+            if (!pc) return;
+            const kbps = parseInt(document.getElementById('qualitySlider').value);
+            pc.getSenders().forEach(async sender => {
+                if (sender.track?.kind !== 'video') return;
+                const params = sender.getParameters();
+                if (!params.encodings?.length) params.encodings = [{}];
+                params.encodings[0].maxBitrate = kbps * 1000;
+                try { await sender.setParameters(params); } catch(e) {}
+            });
+        }
+
+        function toggleInputLock() {
+            inputLocked = document.getElementById('lockInputToggle').checked;
+            log(inputLocked ? 'Viewer input locked' : 'Viewer input unlocked');
         }
 
         function initSocket() {
@@ -105,107 +233,89 @@
         function createPC() {
             pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
             pc.onicecandidate = ({ candidate }) => candidate && socket.emit('ice-candidate', { roomId, candidate });
-            pc.onconnectionstatechange = () => log(`WebRTC: ${pc.connectionState}`);
+            pc.onconnectionstatechange = () => { log(`WebRTC: ${pc.connectionState}`); if (pc.connectionState === 'connected') startStatsLoop(); };
             pc.ontrack = ({ streams }) => {
                 remoteVideo.srcObject = streams[0];
                 remoteScreen.style.display = 'flex';
                 log('Remote desktop stream connected', 'success');
-                setStatus('Viewing &bull; E2EE', '#22c55e');
+                setStatus('Viewing \u2022 E2EE', '#22c55e');
             };
-            
-            if (isHost) {
-                dataChannel = pc.createDataChannel('clipboard');
-                setupDataChannel(dataChannel);
-            } else {
-                pc.ondatachannel = (e) => {
-                    dataChannel = e.channel;
-                    setupDataChannel(dataChannel);
-                };
-            }
+            isHost ? (dataChannel = pc.createDataChannel('clipboard'), setupDataChannel(dataChannel)) : (pc.ondatachannel = (e) => { dataChannel = e.channel; setupDataChannel(dataChannel); });
             if (isHost && localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
         }
 
         function setupDataChannel(channel) {
-            channel.onopen = () => log('E2EE Data channel opened');
+            channel.onopen = () => { log('E2EE Data channel opened'); applyBitrate(); };
             channel.onmessage = async (e) => {
                 const data = JSON.parse(e.data);
                 if (data.type === 'clipboard-sync') {
-                    if (isHost) {
-                        window.electronAPI.writeClipboard(data.text);
-                        log('Host clipboard updated from viewer');
-                    } else {
-                        // Viewer needs manual action to copy due to browser security
-                        console.log("Clipboard sync from host:", data.text);
-                    }
+                    isHost ? (window.electronAPI.writeClipboard(data.text), log('Host clipboard updated from viewer')) : console.log('Clipboard from host:', data.text);
                 }
             };
         }
 
         let lastClipboard = '';
         setInterval(async () => {
-            if (isHost && dataChannel && dataChannel.readyState === 'open') {
+            if (isHost && dataChannel?.readyState === 'open') {
                 const text = await window.electronAPI.readClipboard();
-                if (text && text !== lastClipboard) {
-                    lastClipboard = text;
-                    dataChannel.send(JSON.stringify({ type: 'clipboard-sync', text }));
-                }
+                if (text && text !== lastClipboard) { lastClipboard = text; dataChannel.send(JSON.stringify({ type: 'clipboard-sync', text })); }
             }
         }, 2000);
 
-        function sendFile(file) {
-            if (!file) return;
-            if (!dataChannel || dataChannel.readyState !== 'open') return log('Data channel not open. Ensure viewer is connected.', 'error');
-            log(`Sending file: ${file.name} (${file.size} bytes)...`);
-            dataChannel.send(JSON.stringify({ type: 'file-meta', name: file.name, size: file.size, fileType: file.type }));
-            
-            const reader = new FileReader();
-            let offset = 0;
-            const chunkSize = 16384; // 16KB chunks
-            
-            reader.onload = e => {
-                dataChannel.send(e.target.result);
-                offset += e.target.result.byteLength;
-                if (offset < file.size) readSlice(offset);
-                else log(`File ${file.name} sent successfully`, 'success');
-            };
-            const readSlice = o => {
-                const slice = file.slice(offset, o + chunkSize);
-                reader.readAsArrayBuffer(slice);
-            };
-            readSlice(0);
+        let statsLoop = null;
+        let lastBytes = 0, lastTs = 0;
+        function startStatsLoop() {
+            if (statsLoop) clearInterval(statsLoop);
+            statsLoop = setInterval(async () => {
+                if (!pc) return;
+                const stats = await pc.getStats();
+                stats.forEach(r => {
+                    if (r.type === 'inbound-rtp' && r.kind === 'video') {
+                        const now = Date.now();
+                        const bps = lastTs ? (r.bytesReceived - lastBytes) / ((now - lastTs) / 1000) * 8 : 0;
+                        lastBytes = r.bytesReceived; lastTs = now;
+                        document.getElementById('statBitrate').textContent = bps > 1e6 ? (bps/1e6).toFixed(1)+' Mbps' : Math.round(bps/1000)+' Kbps';
+                        document.getElementById('statFps').textContent = (r.framesPerSecond || 0).toFixed(0);
+                        if (r.frameWidth) document.getElementById('statRes').textContent = r.frameWidth+'×'+r.frameHeight;
+                    }
+                    if (r.type === 'candidate-pair' && r.state === 'succeeded') {
+                        document.getElementById('statLatency').textContent = r.currentRoundTripTime != null ? Math.round(r.currentRoundTripTime*1000)+'ms' : '—';
+                    }
+                    if (r.type === 'outbound-rtp' && r.kind === 'video') {
+                        const now = Date.now();
+                        const bps = lastTs ? (r.bytesSent - lastBytes) / ((now - lastTs) / 1000) * 8 : 0;
+                        lastBytes = r.bytesSent; lastTs = now;
+                        document.getElementById('statBitrate').textContent = bps > 1e6 ? (bps/1e6).toFixed(1)+' Mbps' : Math.round(bps/1000)+' Kbps';
+                        document.getElementById('statFps').textContent = (r.framesPerSecond || 0).toFixed(0);
+                        if (r.frameWidth) document.getElementById('statRes').textContent = r.frameWidth+'×'+r.frameHeight;
+                    }
+                });
+            }, 2000);
         }
 
         let availableSources = [];
         window.electronAPI.getSources().then(sources => {
             availableSources = sources;
             const select = document.getElementById('monitorSelect');
-            sources.forEach(src => {
-                const opt = document.createElement('option');
-                opt.value = src.id;
-                opt.textContent = src.name;
-                select.appendChild(opt);
-            });
+            sources.forEach(src => { const opt = document.createElement('option'); opt.value = src.id; opt.textContent = src.name; select.appendChild(opt); });
         });
 
         async function createAndHost() {
             initSocket();
             const customCode = document.getElementById('customRoomCode').value.trim().toUpperCase();
             if (customCode) localStorage.setItem('amni-custom-code', customCode);
-            
             const sourceId = document.getElementById('monitorSelect').value;
             const src = availableSources.find(s => s.id === sourceId) || availableSources[0];
-
+            const res = getResolution();
+            const fps = parseInt(document.getElementById('fpsSelect').value);
+            const audioOn = document.getElementById('audioToggle').checked;
+            const videoConstraints = { chromeMediaSource: 'desktop', chromeMediaSourceId: src.id, frameRate: { ideal: fps } };
+            if (res) { videoConstraints.maxWidth = res.width; videoConstraints.maxHeight = res.height; }
             try {
-                localStream = await navigator.mediaDevices.getUserMedia({
-                    audio: { mandatory: { chromeMediaSource: 'desktop' } },
-                    video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: src.id, maxWidth: 1920, maxHeight: 1080, frameRate: { ideal: 30 } } }
-                });
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: audioOn ? { mandatory: { chromeMediaSource: 'desktop' } } : false, video: { mandatory: videoConstraints } });
             } catch (err) {
-                log('Audio capture not supported or denied, falling back to video only', 'error');
-                localStream = await navigator.mediaDevices.getUserMedia({
-                    audio: false,
-                    video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: src.id, maxWidth: 1920, maxHeight: 1080, frameRate: { ideal: 30 } } }
-                });
+                log('Falling back to video-only capture', 'error');
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: videoConstraints } });
             }
             localStream.getTracks().forEach(t => t.onended = () => endSession(true));
             isHost = true;
@@ -216,17 +326,18 @@
                 document.getElementById('hostMode').style.display = 'none';
                 document.getElementById('viewerMode').style.display = 'none';
                 document.getElementById('displayCode').textContent = roomId;
-                generateQR(roomId);
-                setStatus('Hosting &bull; E2EE', '#22c55e');
-                log(`Room ${roomId} created — sharing screen: ${src.name}`, 'success');
+                setStatus('Hosting \u2022 E2EE', '#22c55e');
+                log(`Room ${roomId} created — sharing: ${src.name}`, 'success');
                 socket.on('viewer-joined', async () => {
-                    log('Viewer joined — starting WebRTC offer');
+                    log('Viewer joined — sending offer');
                     createPC();
                     const offer = await pc.createOffer();
                     await pc.setLocalDescription(offer);
                     socket.emit('offer', { roomId, offer });
                 });
-                socket.on('input-event', (data) => window.electronAPI.sendInputEvent(data));
+                socket.on('input-event', (data) => {
+                    if (!inputLocked && !document.getElementById('viewOnlyToggle').checked) window.electronAPI.sendInputEvent(data);
+                });
             });
         }
 
@@ -242,8 +353,8 @@
                 document.getElementById('hostMode').style.display = 'none';
                 document.getElementById('viewerMode').style.display = 'none';
                 document.getElementById('displayCode').textContent = roomId;
-                setStatus('Connected &bull; E2EE', '#22c55e');
-                log('Joined — waiting for host stream...', 'success');
+                setStatus('Connected \u2022 E2EE', '#22c55e');
+                log('Joined — waiting for stream...', 'success');
                 createPC();
             });
             socket.once('error', (msg) => log(msg, 'error'));
@@ -258,22 +369,20 @@
             log(`Mobile link copied: ${url}`, 'success');
         }
 
-        function generateQR(code) { log(`Room ${code} ready — share code or use Copy Mobile Link`); }
-
         function endSession() {
-            if (confirm('End this session?')) location.reload();
+            if (confirm('End this session?')) { statsLoop && clearInterval(statsLoop); location.reload(); }
         }
 
         const overlay = document.getElementById('inputOverlay');
         overlay.addEventListener('mousemove', (e) => {
-            if (isHost || !roomId) return;
+            if (isHost || !roomId || document.getElementById('viewOnlyToggle').checked) return;
             const r = overlay.getBoundingClientRect();
             window.electronAPI.sendInputEvent({ type: 'mouse-move', x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height, roomId });
         });
-        overlay.addEventListener('click', () => !isHost && roomId && window.electronAPI.sendInputEvent({ type: 'mouse-click', roomId }));
-        overlay.addEventListener('contextmenu', (e) => { e.preventDefault(); !isHost && roomId && window.electronAPI.sendInputEvent({ type: 'mouse-right-click', roomId }); });
-        document.addEventListener('keydown', (e) => !isHost && roomId && window.electronAPI.sendInputEvent({ type: 'key-down', key: e.key, roomId }));
-        document.addEventListener('keyup', (e) => !isHost && roomId && window.electronAPI.sendInputEvent({ type: 'key-up', key: e.key, roomId }));
+        overlay.addEventListener('click', () => { if (!isHost && roomId && !document.getElementById('viewOnlyToggle').checked) window.electronAPI.sendInputEvent({ type: 'mouse-click', roomId }); });
+        overlay.addEventListener('contextmenu', (e) => { e.preventDefault(); if (!isHost && roomId && !document.getElementById('viewOnlyToggle').checked) window.electronAPI.sendInputEvent({ type: 'mouse-right-click', roomId }); });
+        document.addEventListener('keydown', (e) => { if (!isHost && roomId && !document.getElementById('viewOnlyToggle').checked) window.electronAPI.sendInputEvent({ type: 'key-down', key: e.key, roomId }); });
+        document.addEventListener('keyup', (e) => { if (!isHost && roomId && !document.getElementById('viewOnlyToggle').checked) window.electronAPI.sendInputEvent({ type: 'key-up', key: e.key, roomId }); });
 
         window.electronAPI?.onStatusUpdate?.(msg => log(msg));
         log('Amni-Connect initialized — End-to-End Encrypted', 'success');

@@ -20,17 +20,17 @@ button{background:#6366f1;border:none;border-radius:10px;color:white;font-size:1
 button:active{background:#4f46e5}
 button.danger{background:#ef4444}
 #status-bar{background:rgba(15,23,42,.9);padding:10px 16px;font-size:12px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#viewer-screen{flex:1;display:none;position:relative;background:#000;overflow:auto}
+#viewer-screen{flex:1;display:none;position:relative;background:#000;overflow:hidden}
 #zoom-container{width:100%;height:100%;position:relative;transform-origin:0 0;transition:transform 0.2s}
 video{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none}
 #touch-overlay{position:absolute;inset:0;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none}
-#toolbar{position:absolute;bottom:0;left:0;right:0;display:flex;gap:4px;padding:8px;background:rgba(0,0,0,.6);backdrop-filter:blur(8px);z-index:30}
-#toolbar button{flex:1;padding:8px 4px;font-size:12px;border-radius:6px;margin:0;white-space:nowrap}
+#toolbar{position:fixed;left:0;right:0;bottom:0;display:flex;gap:4px;padding:8px;background:rgba(0,0,0,.72);backdrop-filter:blur(8px);z-index:60;padding-left:max(8px,env(safe-area-inset-left));padding-right:max(8px,env(safe-area-inset-right));padding-bottom:max(8px,env(safe-area-inset-bottom))}
+#toolbar button{width:auto;min-width:0;flex:1;padding:8px 4px;font-size:12px;border-radius:6px;margin:0;white-space:nowrap}
 #mode-btn{background:#475569}
 #zoom-btn{background:#3b82f6}
 #kb-btn{background:#334155}
 #dc-btn{background:#ef4444}
-#keyboard-bar{position:absolute;bottom:45px;left:0;right:0;display:none;padding:8px;background:rgba(0,0,0,.92);z-index:25;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation}
+#keyboard-bar{position:fixed;bottom:52px;left:0;right:0;display:none;padding:8px;background:rgba(0,0,0,.92);z-index:55;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation;padding-left:max(8px,env(safe-area-inset-left));padding-right:max(8px,env(safe-area-inset-right));padding-bottom:max(8px,env(safe-area-inset-bottom))}
 #keyboard-bar button{touch-action:manipulation}
 #kb-display{display:flex;gap:6px;margin-bottom:6px;align-items:center}
 #kb-text{flex:1;background:#1e2937;border:2px solid #475569;border-radius:8px;color:#fff;font-size:15px;padding:10px 12px;min-height:38px;max-height:72px;overflow-y:auto;font-family:monospace;word-break:break-all;white-space:pre-wrap;line-height:1.3}
@@ -91,7 +91,7 @@ video{width:100%;height:100%;object-fit:contain;display:block;pointer-events:non
     </div>
     <div id="kb-keys"></div>
   </div>
-  <div id="clipboard-bar" style="position:absolute;bottom:45px;left:0;right:0;display:none;padding:10px;background:rgba(0,0,0,.8);z-index:20;">
+  <div id="clipboard-bar" style="position:fixed;bottom:52px;left:0;right:0;display:none;padding:10px;background:rgba(0,0,0,.8);z-index:54;padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right));padding-bottom:max(10px,env(safe-area-inset-bottom));">
     <div style="display:flex;flex-direction:column;gap:8px">
       <div style="display:flex;justify-content:space-between;color:#e2e8f0;font-size:12px;font-weight:600">
         <span>Clipboard Sync</span>
@@ -145,6 +145,7 @@ function connect() {
     document.getElementById('connect-screen').style.display = 'none';
     document.getElementById('viewer-screen').style.display = 'flex';
     document.getElementById('viewer-screen').style.flexDirection = 'column';
+    document.getElementById('toolbar').style.display = 'flex';
     createPC();
   });
   socket.on('error', (msg) => setStatus(`Error: ${msg}`));
