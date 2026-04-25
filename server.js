@@ -13,10 +13,23 @@ const server = http.createServer(app);
 const io = socketIo(server, { cors: { origin: ALLOWED_ORIGINS, methods: ['GET', 'POST'] } });
 
 app.use('/socket.io-client', express.static(path.join(__dirname, 'node_modules', 'socket.io-client', 'dist')));
-app.get('/viewer', (_, res) => res.sendFile(path.join(__dirname, 'viewer.html')));
+app.get('/viewer', (_, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  res.sendFile(path.join(__dirname, 'viewer.html'));
+});
 app.get('/health', (_, res) => res.json({ status: 'ok', port: PORT }));
 
 const rooms = new Map();
+
+server.on('error', (err) => {
+  if (err?.code === 'EADDRINUSE') {
+    console.warn(`Amni-Connect signaling already running on port ${PORT}, reusing existing instance`);
+    return;
+  }
+  console.error('Amni-Connect signaling server error:', err);
+});
 
 io.on('connection', (socket) => {
   socket.on('create-room', (customId) => {
@@ -58,3 +71,4 @@ io.on('connection', (socket) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => console.log(`Amni-Connect signaling server on port ${PORT}\nMobile viewer: http://<your-ip>:${PORT}/viewer`));
+module.exports = server;

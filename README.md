@@ -48,6 +48,20 @@ Amni-Connect/
    npm start
    ```
 
+### Linux setup notes
+
+Install system deps before `cargo build` so `enigo` can drive X11/Wayland input:
+
+```bash
+# Debian / Ubuntu
+sudo apt install libxdo-dev libxkbcommon-dev libxtst-dev pkg-config
+
+# Fedora
+sudo dnf install libxdo-devel libxkbcommon-devel libXtst-devel
+```
+
+Wayland users: screen capture goes through PipeWire automatically (the Electron flags are wired in `main.js`). On first launch the desktop portal will ask you to pick a window/monitor.
+
 ### Usage
 - Click **"Start Hosting (Share Screen)"** on the machine you want to control.
 - On the second device, enter the room code → you instantly gain mouse + keyboard control.
