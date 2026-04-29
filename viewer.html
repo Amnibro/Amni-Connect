@@ -19,7 +19,11 @@ input:focus{border-color:#6366f1}
 button{background:#6366f1;border:none;border-radius:10px;color:white;font-size:15px;font-weight:600;padding:14px;width:100%;cursor:pointer;transition:background .2s}
 button:active{background:#4f46e5}
 button.danger{background:#ef4444}
-#status-bar{background:rgba(15,23,42,.9);padding:10px 16px;font-size:12px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#status-bar{background:rgba(15,23,42,.9);padding:10px 16px;font-size:12px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:8px}
+#status-text{flex:1;overflow:hidden;text-overflow:ellipsis}
+#signal-pill{display:none;align-items:center;gap:5px;padding:3px 9px;border-radius:9999px;background:rgba(255,255,255,0.06);font-size:11px;font-weight:600;letter-spacing:0.3px;flex-shrink:0}
+#signal-pill.on{display:inline-flex}
+#signal-dot{width:7px;height:7px;border-radius:50%;background:#64748b}
 #viewer-screen{flex:1;display:none;position:relative;background:#000;overflow:hidden}
 #zoom-container{width:100%;height:100%;position:relative;transform-origin:0 0;transition:transform 0.2s}
 video{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none}
@@ -66,7 +70,7 @@ video{width:100%;height:100%;object-fit:contain;display:block;pointer-events:non
   </div>
 </div>
 
-<div id="status-bar">Ready</div>
+<div id="status-bar"><span id="status-text">Ready</span><span id="signal-pill"><span id="signal-dot"></span><span id="signal-label">—</span></span></div>
 
 <div id="viewer-screen">
   <div id="zoom-container">
@@ -124,8 +128,46 @@ if (document.getElementById('host-input').value && document.getElementById('code
 
 const ICE = [{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}];
 let socket, pc, roomId;
-const statusEl = document.getElementById('status-bar');
+const statusEl = document.getElementById('status-text');
 const setStatus = (t) => statusEl.textContent = t;
+const sigPill = document.getElementById('signal-pill');
+const sigDot = document.getElementById('signal-dot');
+const sigLabel = document.getElementById('signal-label');
+function classifySignal(loss, rtt) {
+  const r = rtt || 0, l = loss || 0;
+  if (r > 0.3 || l > 0.07) return { name: 'Poor', color: '#ef4444' };
+  if (r > 0.15 || l > 0.03) return { name: 'Fair', color: '#f59e0b' };
+  if (r > 0.07 || l > 0.01) return { name: 'Good', color: '#22c55e' };
+  return r > 0 ? { name: 'Excellent', color: '#86efac' } : { name: '—', color: '#64748b' };
+}
+let viewerStatsLoop = null;
+let priorRcvd = 0, priorLost = 0;
+function startViewerStats() {
+  if (viewerStatsLoop) clearInterval(viewerStatsLoop);
+  sigPill.classList.add('on');
+  viewerStatsLoop = setInterval(async () => {
+    if (!pc) return;
+    const s = await pc.getStats();
+    let rtt = 0, loss = 0, haveRtt = false, haveLoss = false;
+    s.forEach(r => {
+      if (r.type === 'inbound-rtp' && r.kind === 'video') {
+        const rcvd = r.packetsReceived || 0, lost = r.packetsLost || 0;
+        const dRcvd = rcvd - priorRcvd, dLost = lost - priorLost;
+        priorRcvd = rcvd; priorLost = lost;
+        if (dRcvd + dLost > 0) { loss = Math.max(0, dLost / (dRcvd + dLost)); haveLoss = true; }
+      }
+      if (r.type === 'candidate-pair' && (r.state === 'succeeded' || r.nominated)) {
+        if (r.currentRoundTripTime != null) { rtt = r.currentRoundTripTime; haveRtt = true; }
+      }
+    });
+    const sig = classifySignal(loss, rtt);
+    sigDot.style.background = sig.color;
+    const rttMs = haveRtt ? Math.round(rtt * 1000) + 'ms' : '';
+    const lossPct = haveLoss && loss > 0.001 ? ' · ' + (loss * 100).toFixed(1) + '%' : '';
+    sigLabel.textContent = sig.name + (rttMs ? ' (' + rttMs + lossPct + ')' : '');
+  }, 2000);
+}
+function stopViewerStats() { if (viewerStatsLoop) { clearInterval(viewerStatsLoop); viewerStatsLoop = null; } sigPill.classList.remove('on'); }
 
 function connect() {
   const host = document.getElementById('host-input').value.trim();
@@ -168,12 +210,17 @@ let incomingFile = null, incomingBuffers = [], incomingSize = 0;
 function createPC() {
   pc = new RTCPeerConnection({ iceServers: ICE });
   pc.onicecandidate = ({ candidate }) => candidate && socket.emit('ice-candidate', { roomId, candidate });
-  pc.onconnectionstatechange = () => setStatus(`WebRTC: ${pc.connectionState}`);
+  pc.onconnectionstatechange = () => {
+    setStatus(`WebRTC: ${pc.connectionState}`);
+    if (pc.connectionState === 'connected') startViewerStats();
+    else if (['failed','disconnected','closed'].includes(pc.connectionState)) stopViewerStats();
+  };
   pc.ontrack = ({ streams }) => {
     const v = document.getElementById('remote-video');
     v.srcObject = streams[0];
     v.play().catch(()=>{});
     setStatus('Streaming \u25cf Live');
+    startViewerStats();
   };
   pc.ondatachannel = (e) => {
     dataChannel = e.channel;
@@ -692,7 +739,7 @@ function sendClipboard() {
 }
 
 function disconnect() {
-  pc?.close(); socket?.disconnect();
+  pc?.close(); socket?.disconnect(); stopViewerStats();
   document.getElementById('viewer-screen').style.display = 'none';
   document.getElementById('connect-screen').style.display = 'flex';
   setStatus('Disconnected');
