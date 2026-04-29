@@ -52,10 +52,22 @@
         .slider:before { content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: white; border-radius: 50%; transition: transform 0.2s; }
         .toggle input:checked + .slider { background: #6366f1; }
         .toggle input:checked + .slider:before { transform: translateX(16px); }
-        .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+        .stat-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 10px; }
         .stat-box { background: #0a0f1a; border-radius: 8px; padding: 8px 10px; }
         .stat-box .stat-label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
         .stat-box .stat-val { font-size: 14px; font-weight: 600; color: #e2e8f0; margin-top: 2px; }
+        .segmented { display: flex; background: #0a0f1a; border-radius: 10px; padding: 3px; margin-bottom: 14px; gap: 3px; border: 1px solid #1e293b; }
+        .seg-btn { flex: 1; padding: 9px 8px; background: transparent; color: #94a3b8; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; margin: 0; transition: background 0.15s, color 0.15s; }
+        .seg-btn.active { background: #1e2937; color: white; box-shadow: 0 1px 2px rgba(0,0,0,0.35); }
+        .seg-btn:hover:not(.active) { color: #cbd5e1; }
+        .auto-hint { font-size: 10px; color: #6366f1; margin: -6px 0 8px 0; letter-spacing: 0.4px; text-transform: uppercase; font-weight: 600; display: none; }
+        .auto-hint.on { display: block; }
+        .signal-pill { display: inline-flex; align-items: center; gap: 5px; }
+        .signal-dot { width: 8px; height: 8px; border-radius: 50%; background: #64748b; }
+        .live-pill { display: inline-block; font-size: 10px; padding: 3px 8px; border-radius: 9999px; background: #22c55e; color: white; font-weight: 700; letter-spacing: 0.5px; margin-left: 6px; vertical-align: middle; animation: pulse 2s ease-in-out infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+        h2.section-head .live-pill { animation: pulse 2s ease-in-out infinite; }
+        input[disabled], select[disabled] { opacity: 0.55; cursor: not-allowed; }
     </style>
 </head>
 <body>
@@ -68,12 +80,16 @@
             <div class="panel">
                 <div class="panel-scroll">
                     <h2>&#128640; Session Control</h2>
+                    <div class="segmented" id="modeSwitch">
+                        <button class="seg-btn active" data-mode="host" onclick="setMode('host')">&#128640; Host</button>
+                        <button class="seg-btn" data-mode="join" onclick="setMode('join')">&#128279; Join</button>
+                    </div>
                     <div id="hostMode">
                         <input type="text" id="customRoomCode" placeholder="Optional: Persistent Room Code" style="text-transform:uppercase">
                         <select id="monitorSelect"></select>
                         <button onclick="createAndHost()">&#128640; Start Hosting (Share Screen)</button>
                     </div>
-                    <div id="viewerMode">
+                    <div id="viewerMode" style="display:none;">
                         <input type="text" id="roomCodeInput" placeholder="Enter Room Code" maxlength="32" style="text-transform:uppercase">
                         <button onclick="joinSession()">&#128279; Join Remote Session</button>
                     </div>
@@ -86,7 +102,7 @@
                         <button class="danger" onclick="endSession()">&#9940; End Session</button>
                     </div>
 
-                    <h2 class="section-head">&#9881;&#65039; Stream Settings</h2>
+                    <h2 class="section-head">&#9881;&#65039; Stream Settings <span id="liveSettingsPill" class="live-pill" style="display:none;">LIVE</span></h2>
                     <div class="setting-row">
                         <label>Resolution</label>
                         <select id="resolutionSelect" onchange="applyStreamSettings()">
@@ -107,9 +123,14 @@
                         </select>
                     </div>
                     <div class="setting-row">
-                        <label>Quality</label>
-                        <input type="range" id="qualitySlider" min="500" max="20000" step="500" value="8000" oninput="updateQualityLabel();applyBitrate()">
+                        <label>Bitrate</label>
+                        <input type="range" id="qualitySlider" min="500" max="20000" step="500" value="8000" oninput="onSliderInput()">
                         <span class="quality-val" id="qualityLabel">8 Mbps</span>
+                    </div>
+                    <div id="autoHint" class="auto-hint">&#128640; Auto-adapting to network</div>
+                    <div class="toggle-row">
+                        <label>Auto Bitrate <span style="font-size:10px;color:#64748b;font-weight:400;">(adapts to signal)</span></label>
+                        <label class="toggle"><input type="checkbox" id="autoBitrateToggle" checked onchange="toggleAutoBitrate()"><span class="slider"></span></label>
                     </div>
                     <div class="toggle-row">
                         <label>Audio</label>
@@ -129,7 +150,9 @@
                         <div class="stat-box"><div class="stat-label">Bitrate</div><div class="stat-val" id="statBitrate">—</div></div>
                         <div class="stat-box"><div class="stat-label">FPS</div><div class="stat-val" id="statFps">—</div></div>
                         <div class="stat-box"><div class="stat-label">Latency</div><div class="stat-val" id="statLatency">—</div></div>
+                        <div class="stat-box"><div class="stat-label">Loss</div><div class="stat-val" id="statLoss">—</div></div>
                         <div class="stat-box"><div class="stat-label">Resolution</div><div class="stat-val" id="statRes">—</div></div>
+                        <div class="stat-box"><div class="stat-label">Signal</div><div class="stat-val signal-pill" id="statSignal"><span class="signal-dot" id="signalDot"></span><span id="signalText">—</span></div></div>
                     </div>
                 </div>
 
@@ -171,6 +194,47 @@
             document.getElementById('qualityLabel').textContent = v >= 1000 ? (v / 1000).toFixed(v % 1000 ? 1 : 0) + ' Mbps' : v + ' Kbps';
         }
         updateQualityLabel();
+
+        const AB = { enabled: true, lastLoss: 0, lastRtt: 0, lastAvail: 0, lastQlim: 'none', priorPacketsLost: 0, priorPacketsRcvd: 0 };
+        function onSliderInput() {
+            updateQualityLabel();
+            if (document.getElementById('autoBitrateToggle').checked) { document.getElementById('autoBitrateToggle').checked = false; toggleAutoBitrate(); }
+            applyBitrate();
+        }
+        function toggleAutoBitrate() {
+            AB.enabled = document.getElementById('autoBitrateToggle').checked;
+            document.getElementById('autoHint').classList.toggle('on', AB.enabled);
+            log(AB.enabled ? 'Auto-bitrate enabled — adapting to network' : 'Auto-bitrate off — manual slider authoritative');
+        }
+        function setMode(mode) {
+            document.querySelectorAll('#modeSwitch .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+            document.getElementById('hostMode').style.display = mode === 'host' ? 'block' : 'none';
+            document.getElementById('viewerMode').style.display = mode === 'join' ? 'block' : 'none';
+        }
+        function setLiveSettings(on) {
+            document.getElementById('liveSettingsPill').style.display = on ? 'inline-block' : 'none';
+        }
+        function signalLabel(loss, rtt) {
+            const r = rtt || 0, l = loss || 0;
+            if (r > 0.3 || l > 0.07) return { name: 'Poor', color: '#ef4444' };
+            if (r > 0.15 || l > 0.03) return { name: 'Fair', color: '#f59e0b' };
+            if (r > 0.07 || l > 0.01) return { name: 'Good', color: '#22c55e' };
+            return r > 0 ? { name: 'Excellent', color: '#86efac' } : { name: '—', color: '#64748b' };
+        }
+        function autoTick() {
+            if (!pc || !AB.enabled || !isHost) return;
+            const slider = document.getElementById('qualitySlider');
+            const cur = parseInt(slider.value);
+            const lossBad = AB.lastLoss > 0.05, lossOk = AB.lastLoss < 0.01;
+            const rttBad = AB.lastRtt > 0.25, rttOk = AB.lastRtt > 0 && AB.lastRtt < 0.06;
+            const cpuLim = AB.lastQlim === 'cpu', bwLim = AB.lastQlim === 'bandwidth';
+            let next = cur;
+            if (lossBad || rttBad || bwLim) next = Math.max(500, Math.round(cur * 0.82));
+            else if (lossOk && rttOk && !cpuLim) next = Math.min(20000, cur + 500);
+            if (AB.lastAvail > 0) next = Math.min(next, Math.max(500, Math.round(AB.lastAvail / 1000 * 0.92)));
+            next = Math.round(next / 500) * 500;
+            if (Math.abs(next - cur) >= 500) { slider.value = next; updateQualityLabel(); applyBitrate(); }
+        }
 
         function getResolution() {
             const v = document.getElementById('resolutionSelect').value;
@@ -269,6 +333,7 @@
             statsLoop = setInterval(async () => {
                 if (!pc) return;
                 const stats = await pc.getStats();
+                let rtt = 0, loss = 0, avail = 0, qlim = 'none', haveRtt = false, haveLoss = false;
                 stats.forEach(r => {
                     if (r.type === 'inbound-rtp' && r.kind === 'video') {
                         const now = Date.now();
@@ -277,9 +342,21 @@
                         document.getElementById('statBitrate').textContent = bps > 1e6 ? (bps/1e6).toFixed(1)+' Mbps' : Math.round(bps/1000)+' Kbps';
                         document.getElementById('statFps').textContent = (r.framesPerSecond || 0).toFixed(0);
                         if (r.frameWidth) document.getElementById('statRes').textContent = r.frameWidth+'×'+r.frameHeight;
+                        const rcvd = r.packetsReceived || 0, lost = r.packetsLost || 0;
+                        const dRcvd = rcvd - AB.priorPacketsRcvd, dLost = lost - AB.priorPacketsLost;
+                        AB.priorPacketsRcvd = rcvd; AB.priorPacketsLost = lost;
+                        if (dRcvd + dLost > 0) { loss = Math.max(0, dLost / (dRcvd + dLost)); haveLoss = true; }
                     }
-                    if (r.type === 'candidate-pair' && r.state === 'succeeded') {
-                        document.getElementById('statLatency').textContent = r.currentRoundTripTime != null ? Math.round(r.currentRoundTripTime*1000)+'ms' : '—';
+                    if (r.type === 'candidate-pair' && (r.state === 'succeeded' || r.nominated)) {
+                        if (r.currentRoundTripTime != null) {
+                            rtt = r.currentRoundTripTime; haveRtt = true;
+                            document.getElementById('statLatency').textContent = Math.round(rtt*1000)+'ms';
+                        }
+                        if (r.availableOutgoingBitrate) avail = r.availableOutgoingBitrate;
+                    }
+                    if (r.type === 'remote-inbound-rtp' && r.kind === 'video') {
+                        if (r.fractionLost != null) { loss = r.fractionLost; haveLoss = true; }
+                        if (r.roundTripTime != null && !haveRtt) { rtt = r.roundTripTime; haveRtt = true; document.getElementById('statLatency').textContent = Math.round(rtt*1000)+'ms'; }
                     }
                     if (r.type === 'outbound-rtp' && r.kind === 'video') {
                         const now = Date.now();
@@ -288,8 +365,18 @@
                         document.getElementById('statBitrate').textContent = bps > 1e6 ? (bps/1e6).toFixed(1)+' Mbps' : Math.round(bps/1000)+' Kbps';
                         document.getElementById('statFps').textContent = (r.framesPerSecond || 0).toFixed(0);
                         if (r.frameWidth) document.getElementById('statRes').textContent = r.frameWidth+'×'+r.frameHeight;
+                        if (r.qualityLimitationReason) qlim = r.qualityLimitationReason;
                     }
                 });
+                if (haveRtt) AB.lastRtt = rtt;
+                if (haveLoss) AB.lastLoss = loss;
+                if (avail) AB.lastAvail = avail;
+                AB.lastQlim = qlim;
+                document.getElementById('statLoss').textContent = haveLoss ? (loss * 100).toFixed(1) + '%' : '—';
+                const sig = signalLabel(AB.lastLoss, AB.lastRtt);
+                document.getElementById('signalText').textContent = sig.name;
+                document.getElementById('signalDot').style.background = sig.color;
+                autoTick();
             }, 2000);
         }
 
@@ -325,8 +412,10 @@
                 document.getElementById('activeSession').style.display = 'block';
                 document.getElementById('hostMode').style.display = 'none';
                 document.getElementById('viewerMode').style.display = 'none';
+                document.getElementById('modeSwitch').style.display = 'none';
                 document.getElementById('displayCode').textContent = roomId;
                 setStatus('Hosting \u2022 E2EE', '#22c55e');
+                setLiveSettings(true);
                 log(`Room ${roomId} created — sharing: ${src.name}`, 'success');
                 socket.on('viewer-joined', async () => {
                     log('Viewer joined — sending offer');
@@ -353,6 +442,9 @@
                 document.getElementById('hostMode').style.display = 'none';
                 document.getElementById('viewerMode').style.display = 'none';
                 document.getElementById('displayCode').textContent = roomId;
+                document.getElementById('modeSwitch').style.display = 'none';
+                ['resolutionSelect','fpsSelect','audioToggle','autoBitrateToggle','qualitySlider'].forEach(i => { const el = document.getElementById(i); if (el) el.disabled = true; });
+                document.getElementById('autoHint').classList.remove('on');
                 setStatus('Connected \u2022 E2EE', '#22c55e');
                 log('Joined — waiting for stream...', 'success');
                 createPC();
@@ -385,6 +477,7 @@
         document.addEventListener('keyup', (e) => { if (!isHost && roomId && !document.getElementById('viewOnlyToggle').checked) window.electronAPI.sendInputEvent({ type: 'key-up', key: e.key, roomId }); });
 
         window.electronAPI?.onStatusUpdate?.(msg => log(msg));
+        document.getElementById('autoHint').classList.toggle('on', document.getElementById('autoBitrateToggle').checked);
         log('Amni-Connect initialized — End-to-End Encrypted', 'success');
     </script>
 </body>
