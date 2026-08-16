@@ -9,18 +9,24 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{touch-action:manipulation}
-body{background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
+:root{--paper:#0A0B0E;--surface:#161a22;--sunk:#1c212b;--ink:#eef1f6;--mut:#9aa3b2;--line:#2a3140;--you:#A88FE8;--you-ink:#0b0d12}
+body{background:var(--paper);color:var(--ink);font-family:system-ui,Segoe UI,sans-serif;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
 #connect-screen{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;gap:16px}
-.logo{font-size:20px;font-weight:700;color:white;margin-bottom:8px}
-.card{background:rgba(30,41,59,0.9);border:1px solid #334155;border-radius:16px;padding:24px;width:100%;max-width:400px;display:flex;flex-direction:column;gap:12px}
+.logo{font-size:20px;font-weight:700;color:var(--you);margin-bottom:8px;letter-spacing:-.02em}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:24px;width:100%;max-width:400px;display:flex;flex-direction:column;gap:12px}
 label{font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px}
-input{background:#0f172a;border:2px solid #475569;border-radius:10px;color:white;font-size:16px;padding:14px 16px;width:100%;outline:none}
-input:focus{border-color:#6366f1}
-button{background:#6366f1;border:none;border-radius:10px;color:white;font-size:15px;font-weight:600;padding:14px;width:100%;cursor:pointer;transition:background .2s}
+input{background:var(--sunk);border:1px solid var(--line);border-radius:10px;color:var(--ink);font-size:16px;padding:14px 16px;width:100%;outline:none}
+input:focus{border-color:var(--you)}
+button{background:var(--you);border:none;border-radius:8px;color:var(--you-ink);font-size:15px;font-weight:600;padding:14px;width:100%;cursor:pointer;transition:background .2s}
 button:active{background:#4f46e5}
 button.danger{background:#ef4444}
-#status-bar{background:rgba(15,23,42,.9);padding:10px 16px;font-size:12px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:8px}
-#status-text{flex:1;overflow:hidden;text-overflow:ellipsis}
+#status-bar{background:color-mix(in srgb,var(--surface) 92%,transparent);padding:10px 16px;font-size:12px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+#status-text{flex:1;overflow:hidden;text-overflow:ellipsis;min-width:8em}
+#link-chips{display:inline-flex;gap:6px;flex-wrap:wrap}
+#link-chips span{font:650 10px/1.1 ui-monospace,Consolas,monospace;padding:3px 8px;border-radius:999px;border:1px solid var(--line);background:var(--sunk);color:var(--mut)}
+#link-chips span.ok{color:#86efac;border-color:color-mix(in srgb,#86efac 35%,var(--line))}
+#link-chips span.bad{color:#fda4af;border-color:color-mix(in srgb,#fda4af 35%,var(--line))}
+#link-chips span.warn{color:var(--you);border-color:color-mix(in srgb,var(--you) 35%,var(--line))}
 #signal-pill{display:none;align-items:center;gap:5px;padding:3px 9px;border-radius:9999px;background:rgba(255,255,255,0.06);font-size:11px;font-weight:600;letter-spacing:0.3px;flex-shrink:0}
 #signal-pill.on{display:inline-flex}
 #signal-dot{width:7px;height:7px;border-radius:50%;background:#64748b}
@@ -53,6 +59,16 @@ video{width:100%;height:100%;object-fit:contain;display:block;pointer-events:non
 .kb-key.kb-space{flex:5}
 #drag-indicator{display:none;position:fixed;top:12px;left:50%;transform:translateX(-50%);background:#6366f1;color:white;padding:5px 16px;border-radius:20px;font-size:12px;font-weight:700;letter-spacing:1px;pointer-events:none;z-index:200;box-shadow:0 2px 12px rgba(99,102,241,.6)}
 #toast{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.85);color:white;padding:10px 22px;border-radius:10px;font-size:14px;pointer-events:none;z-index:200;transition:opacity .35s}
+@media (min-width:820px){
+#connect-screen{padding:48px}
+.card{max-width:440px}
+#toolbar{left:50%;right:auto;transform:translateX(-50%);width:auto;gap:8px;border-radius:12px 12px 0 0;padding:8px 14px}
+#toolbar button{flex:0 0 auto;min-width:88px;padding:10px 16px;font-size:13px}
+#toolbar #zoom-out,#toolbar #zoom-in{min-width:54px}
+#keyboard-bar{left:50%;right:auto;transform:translateX(-50%);width:min(880px,95vw);border-radius:12px 12px 0 0}
+#clipboard-bar{left:50%;right:auto;transform:translateX(-50%);width:min(680px,95vw);border-radius:12px 12px 0 0}
+.kb-key{min-height:34px;padding:8px 0;font-size:14px}
+}
 </style>
 </head>
 <body>
@@ -60,7 +76,7 @@ video{width:100%;height:100%;object-fit:contain;display:block;pointer-events:non
 <div id="drag-indicator">&#9654; DRAG MODE</div>
 <div id="toast"></div>
 <div id="connect-screen">
-  <div class="logo">&#128272; Amni-Connect</div>
+  <div class="logo">Amni-Connect</div>
   <div class="card">
     <label>Host IP / Address</label>
     <input id="host-input" type="text" placeholder="192.168.1.x or hostname" autocomplete="off" autocorrect="off" autocapitalize="none">
@@ -70,7 +86,7 @@ video{width:100%;height:100%;object-fit:contain;display:block;pointer-events:non
   </div>
 </div>
 
-<div id="status-bar"><span id="status-text">Ready</span><span id="signal-pill"><span id="signal-dot"></span><span id="signal-label">—</span></span></div>
+<div id="status-bar"><span id="status-text">Ready</span><div id="link-chips"><span id="chip-sig">sig —</span><span id="chip-rtc">rtc —</span><span id="chip-in">input —</span></div><span id="signal-pill"><span id="signal-dot"></span><span id="signal-label">—</span></span></div>
 
 <div id="viewer-screen">
   <div id="zoom-container">
@@ -105,11 +121,17 @@ video{width:100%;height:100%;object-fit:contain;display:block;pointer-events:non
       <button onclick="sendClipboard()" style="padding:10px;background:#22c55e">Send to Host</button>
     </div>
   </div>
+  <div id="file-progress" style="position:fixed;bottom:52px;left:0;right:0;display:none;padding:10px 14px;background:rgba(0,0,0,.85);z-index:56;padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env(safe-area-inset-right))">
+    <div style="display:flex;justify-content:space-between;font-size:12px;color:#e2e8f0;margin-bottom:6px"><span id="file-progress-name">Sending&hellip;</span><span id="file-progress-pct">0%</span></div>
+    <div style="background:#334155;border-radius:6px;height:8px;overflow:hidden"><div id="file-progress-bar" style="background:#22c55e;height:100%;width:0%;transition:width .1s"></div></div>
+  </div>
+  <input type="file" id="file-input" style="display:none" onchange="uploadFile(this.files[0])">
   <div id="toolbar">
     <button id="mode-btn" onclick="toggleMode()">&#128433; Touch</button>
-    <button id="zoom-out" onclick="zoom(-0.2)" style="background:#3b82f6;flex:0.5">&#128269;-</button>
-    <button id="zoom-in" onclick="zoom(0.2)" style="background:#3b82f6;flex:0.5">&#128269;+</button>
+    <button id="zoom-out" onclick="zoom(1/1.25)" style="background:#3b82f6;flex:0.5">&#128269;-</button>
+    <button id="zoom-in" onclick="zoom(1.25)" style="background:#3b82f6;flex:0.5">&#128269;+</button>
     <button id="clip-btn" onclick="toggleClipboard()" style="background:#f59e0b">📋 Clip</button>
+    <button id="file-btn" onclick="document.getElementById('file-input').click()" style="background:#14b8a6">&#128190; Send</button>
     <button id="kb-btn" onclick="toggleKeyboard()">&#9000; KB</button>
     <button id="dc-btn" onclick="disconnect()">&times;</button>
   </div>
@@ -165,7 +187,8 @@ function startViewerStats() {
     const rttMs = haveRtt ? Math.round(rtt * 1000) + 'ms' : '';
     const lossPct = haveLoss && loss > 0.001 ? ' · ' + (loss * 100).toFixed(1) + '%' : '';
     sigLabel.textContent = sig.name + (rttMs ? ' (' + rttMs + lossPct + ')' : '');
-  }, 2000);
+    paintLinkChips();
+  }, 500);
 }
 function stopViewerStats() { if (viewerStatsLoop) { clearInterval(viewerStatsLoop); viewerStatsLoop = null; } sigPill.classList.remove('on'); }
 
@@ -174,12 +197,13 @@ function connect() {
   const code = document.getElementById('code-input').value.trim().toUpperCase();
   if (!host) return setStatus('Enter host IP or address');
   if (code.length < 4) return setStatus('Room code must be at least 4 characters');
+  wantStay = true; iceTries = 0;
   localStorage.setItem('amni-last-host', host);
   localStorage.setItem('amni-last-code', code);
   const port = location.port || 3389;
   const proto = location.protocol === 'https:' ? 'https' : 'http';
-  socket = io(`${proto}://${host}:${port}`, { transports: ['websocket'] });
-  socket.on('connect', () => { setStatus('Connected to signaling server'); socket.emit('join-room', code); });
+  socket = io(`${proto}://${host}:${port}`, { transports: ['websocket','polling'] });
+  socket.on('connect', () => { setStatus('Connected to signaling server'); socket.emit('join-room', code); paintLinkChips(); });
   socket.on('connect_error', () => setStatus('Cannot reach host — check IP and ensure server is running'));
   socket.on('room-joined', (id) => {
     roomId = id;
@@ -201,19 +225,62 @@ function connect() {
   });
   socket.on('answer', async ({ answer }) => pc?.setRemoteDescription(new RTCSessionDescription(answer)));
   socket.on('ice-candidate', ({ candidate }) => pc?.addIceCandidate(new RTCIceCandidate(candidate)).catch(()=>{}));
-  socket.on('host-disconnected', () => { setStatus('Host disconnected'); disconnect(); });
+  socket.on('input-dropped', (d) => {
+    const now = Date.now();
+    if (now - inputWarnedAt > 4000) { inputWarnedAt = now; showToast(d.reason === 'no-room' ? 'Host room gone - reconnecting' : 'Host offline - input not applied'); }
+  });
+  socket.on('host-disconnected', () => {
+    setStatus('Host dropped · waiting to reclaim…');
+    paintLinkChips();
+    setTimeout(() => { if (socket?.connected && roomId && wantStay) socket.emit('join-room', roomId); }, 2000);
+  });
 }
 
 let dataChannel;
 let incomingFile = null, incomingBuffers = [], incomingSize = 0;
+let iceTries = 0, wantStay = true, recoverBusy = false;
+
+function paintLinkChips() {
+  const sig = document.getElementById('chip-sig');
+  const rtc = document.getElementById('chip-rtc');
+  const inn = document.getElementById('chip-in');
+  if (sig) { const up = !!(socket && socket.connected); sig.textContent = up ? 'sig up' : 'sig down'; sig.className = up ? 'ok' : 'bad'; }
+  const st = pc ? pc.connectionState : 'idle';
+  if (rtc) { rtc.textContent = 'rtc ' + st; rtc.className = st === 'connected' ? 'ok' : (st === 'connecting' || st === 'new' ? 'warn' : 'bad'); }
+  if (inn) { inn.textContent = 'input ' + (inputPath || 'none'); inn.className = inputPath === 'p2p' ? 'ok' : (inputPath === 'relay' ? 'warn' : 'bad'); }
+}
+
+async function recoverPc() {
+  if (recoverBusy || !wantStay) return;
+  recoverBusy = true;
+  try {
+    if (pc && iceTries < 3 && (pc.connectionState === 'failed' || pc.connectionState === 'disconnected')) {
+      iceTries++;
+      setStatus('ICE restart ' + iceTries);
+      const offer = await pc.createOffer({ iceRestart: true });
+      await pc.setLocalDescription(offer);
+      if (socket && roomId) socket.emit('offer', { roomId, offer });
+      return;
+    }
+    try { pc && pc.close(); } catch (e) {}
+    pc = null; dataChannel = null; iceTries = 0;
+    createPC();
+    setStatus('Rebuilding peer…');
+  } catch (e) {
+    try { pc && pc.close(); } catch (x) {}
+    pc = null; createPC();
+  } finally { recoverBusy = false; paintLinkChips(); }
+}
 
 function createPC() {
   pc = new RTCPeerConnection({ iceServers: ICE });
   pc.onicecandidate = ({ candidate }) => candidate && socket.emit('ice-candidate', { roomId, candidate });
   pc.onconnectionstatechange = () => {
     setStatus(`WebRTC: ${pc.connectionState}`);
-    if (pc.connectionState === 'connected') startViewerStats();
-    else if (['failed','disconnected','closed'].includes(pc.connectionState)) stopViewerStats();
+    paintLinkChips();
+    if (pc.connectionState === 'connected') { iceTries = 0; startViewerStats(); }
+    else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') { stopViewerStats(); recoverPc(); }
+    else if (pc.connectionState === 'closed') stopViewerStats();
   };
   pc.ontrack = ({ streams }) => {
     const v = document.getElementById('remote-video');
@@ -253,7 +320,57 @@ function createPC() {
   };
 }
 
-function sendInput(event) { socket?.emit('input-event', { ...event, roomId }); }
+let inputPath = 'none', inputWarnedAt = 0;
+function sendInput(event) {
+  if (dataChannel?.readyState === 'open') {
+    try { dataChannel.send(JSON.stringify({ type: 'input', ev: event })); inputPath = 'p2p'; paintLinkChips(); return; } catch (e) {}
+  }
+  if (socket?.connected) { socket.emit('input-event', { ...event, roomId }); inputPath = 'relay'; paintLinkChips(); return; }
+  inputPath = 'none'; paintLinkChips();
+  const now = Date.now();
+  if (now - inputWarnedAt > 4000) { inputWarnedAt = now; showToast('Input offline - reconnecting'); setStatus('Input offline - control not reaching host'); }
+}
+let lastRightClick = 0;
+function sendRightClick() {
+  const now = Date.now();
+  if (now - lastRightClick < 350) return;
+  lastRightClick = now;
+  sendInput({ type: 'mouse-right-click' });
+}
+
+// ── File transfer ────────────────────────────────────────────────────────────
+const fileProgress = document.getElementById('file-progress');
+const fileProgressBar = document.getElementById('file-progress-bar');
+const fileProgressPct = document.getElementById('file-progress-pct');
+const fileProgressName = document.getElementById('file-progress-name');
+function uploadFile(file) {
+  if (!file || !roomId) return;
+  const host = document.getElementById('host-input').value.trim();
+  const port = location.port || 3389;
+  const proto = location.protocol === 'https:' ? 'https' : 'http';
+  const form = new FormData();
+  form.append('roomId', roomId);
+  form.append('file', file);
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', `${proto}://${host}:${port}/upload`);
+  fileProgress.style.display = 'block';
+  fileProgressName.textContent = file.name;
+  fileProgressBar.style.width = '0%';
+  fileProgressPct.textContent = '0%';
+  xhr.upload.onprogress = (e) => {
+    if (!e.lengthComputable) return;
+    const pct = Math.round((e.loaded / e.total) * 100);
+    fileProgressBar.style.width = pct + '%';
+    fileProgressPct.textContent = pct + '%';
+  };
+  xhr.onload = () => {
+    fileProgress.style.display = 'none';
+    document.getElementById('file-input').value = '';
+    showToast(xhr.status === 200 ? `Sent ${file.name}` : 'Send failed');
+  };
+  xhr.onerror = () => { fileProgress.style.display = 'none'; showToast('Send failed'); };
+  xhr.send(form);
+}
 
 // ── Visual feedback ──────────────────────────────────────────────────────────
 const dragIndicator = document.getElementById('drag-indicator');
@@ -305,16 +422,26 @@ function applyTransform(instant) {
   c.style.transform = `translate(${panX}px,${panY}px) scale(${currentZoom})`;
 }
 
-// ── Toolbar zoom — anchored to viewport center ────────────────────────────────
-function zoom(delta) {
-  const prev = currentZoom;
-  currentZoom = Math.max(0.5, Math.min(4, currentZoom + delta));
-  if (currentZoom !== prev) {
-    const vw = overlay.clientWidth, vh = overlay.clientHeight;
-    panX = vw / 2 - (vw / 2 - panX) * (currentZoom / prev);
-    panY = vh / 2 - (vh / 2 - panY) * (currentZoom / prev);
-    clampPan(); applyTransform(false);
-  }
+// ── Zoom — multiplicative, cap scales with source resolution ──────────────────
+const ZOOM_MIN = 0.5, ZOOM_HARD_MAX = 32, ZOOM_STEP = 1.25, ZOOM_PX_PER_SRC = 4;
+function maxZoom() {
+  const v = document.getElementById('remote-video'), base = getVideoRect().width / currentZoom;
+  return !v.videoWidth || !base ? 8 : Math.min(ZOOM_HARD_MAX, Math.max(4, v.videoWidth / base * ZOOM_PX_PER_SRC));
+}
+function setZoom(next, clientX, clientY) {
+  const prev = currentZoom, r = document.getElementById('viewer-screen').getBoundingClientRect();
+  currentZoom = Math.max(ZOOM_MIN, Math.min(maxZoom(), next));
+  if (currentZoom === prev) return false;
+  const k = currentZoom / prev, ax = clientX - r.left, ay = clientY - r.top;
+  panX = ax - (ax - panX) * k;
+  panY = ay - (ay - panY) * k;
+  clampPan();
+  return true;
+}
+function zoom(factor) {
+  const r = document.getElementById('viewer-screen').getBoundingClientRect();
+  setZoom(currentZoom * factor, r.left + r.width / 2, r.top + r.height / 2) &&
+    (applyTransform(false), showToast(`${currentZoom.toFixed(currentZoom < 10 ? 1 : 0)}×`));
 }
 
 // ── Touch gesture state ──────────────────────────────────────────────────────
@@ -336,10 +463,12 @@ let lastTapTime = 0, lastTapPos = null;
 let isDragLock = false, dragLockActive = false;
 
 let touchMode = 'touch';
+let lastTouchTs = 0;
 
 // ── touchstart ───────────────────────────────────────────────────────────────
 overlay.addEventListener('touchstart', (e) => {
   e.preventDefault();
+  lastTouchTs = Date.now();
   maxTouchCount = Math.max(maxTouchCount, e.touches.length);
 
   if (e.touches.length === 2) {
@@ -397,7 +526,7 @@ overlay.addEventListener('touchstart', (e) => {
         const sc = screenCoord(touchStartPos.x, touchStartPos.y);
         sendInput({ type: 'mouse-move', x: sc.x, y: sc.y });
       }
-      sendInput({ type: 'mouse-right-click' });
+      sendRightClick();
       showToast('Right Click');
       touchStartPos = null; // suppress tap on release
     }
@@ -437,10 +566,7 @@ overlay.addEventListener('touchmove', (e) => {
     if (Math.abs(dcx) > 1 || Math.abs(dcy) > 1 || isZooming) pinchMoved = true;
 
     if (isZooming) {
-      const prev = currentZoom;
-      currentZoom = Math.max(0.5, Math.min(4, currentZoom * scaleRatio));
-      panX = cx - (cx - panX) * (currentZoom / prev);
-      panY = cy - (cy - panY) * (currentZoom / prev);
+      setZoom(currentZoom * scaleRatio, cx, cy);
     } else if (currentZoom > 1.05) {
       panX += dcx; panY += dcy;
     } else {
@@ -490,8 +616,6 @@ overlay.addEventListener('touchmove', (e) => {
   if (touchMode === 'trackpad') {
     const vr = getVideoRect();
     sendInput({ type: 'mouse-move-rel', dx: pxDx / vr.width, dy: pxDy / vr.height });
-  } else if (currentZoom > 1.05) {
-    panX += pxDx; panY += pxDy; clampPan(); applyTransform(true);
   } else {
     const sc = screenCoord(t.clientX, t.clientY);
     sendInput({ type: 'mouse-move', x: sc.x, y: sc.y });
@@ -502,6 +626,7 @@ overlay.addEventListener('touchmove', (e) => {
 // ── touchend ─────────────────────────────────────────────────────────────────
 overlay.addEventListener('touchend', (e) => {
   e.preventDefault();
+  lastTouchTs = Date.now();
   const allUp = e.touches.length === 0;
 
   // Transitioning from multi to single touch — reset pinch but keep single-touch going
@@ -524,7 +649,7 @@ overlay.addEventListener('touchend', (e) => {
     lastTouch = null; touchStartPos = null; isDragging = false;
     if (!savedMoved) {
       if (savedCount >= 3) { sendInput({ type: 'mouse-middle-click' }); showToast('Middle Click'); }
-      else                 { sendInput({ type: 'mouse-right-click'  }); showToast('Right Click');  }
+      else                 { sendRightClick(); showToast('Right Click');  }
     }
     return;
   }
@@ -564,7 +689,53 @@ overlay.addEventListener('touchend', (e) => {
   lastTouch = null; touchStartPos = null; isDragging = false; maxTouchCount = 0;
 }, { passive: false });
 
-overlay.addEventListener('contextmenu', (e) => { e.preventDefault(); sendInput({ type: 'mouse-right-click' }); });
+overlay.addEventListener('contextmenu', (e) => { e.preventDefault(); sendRightClick(); });
+
+// ── Desktop / laptop input: physical mouse, wheel, hardware keyboard ───────────
+let mouseHeld = false;
+const desktopActive = () => Date.now() - lastTouchTs > 700;
+overlay.addEventListener('mousedown', (e) => {
+  if (!desktopActive()) return;
+  e.preventDefault();
+  if (touchMode !== 'trackpad') { const sc = screenCoord(e.clientX, e.clientY); sendInput({ type: 'mouse-move', x: sc.x, y: sc.y }); }
+  e.button === 2 ? sendRightClick() : e.button === 1 ? sendInput({ type: 'mouse-middle-click' }) : (mouseHeld = true, sendInput({ type: 'mouse-down' }));
+});
+overlay.addEventListener('mousemove', (e) => {
+  if (!desktopActive()) return;
+  if (touchMode === 'trackpad') { const vr = getVideoRect(); sendInput({ type: 'mouse-move-rel', dx: e.movementX / vr.width, dy: e.movementY / vr.height }); }
+  else { const sc = screenCoord(e.clientX, e.clientY); sendInput({ type: 'mouse-move', x: sc.x, y: sc.y }); }
+});
+const endMouse = () => { if (mouseHeld) { mouseHeld = false; sendInput({ type: 'mouse-up' }); } };
+overlay.addEventListener('mouseup', (e) => { if (!desktopActive()) return; e.preventDefault(); (e.button === 0) && endMouse(); });
+overlay.addEventListener('mouseleave', endMouse);
+overlay.addEventListener('dblclick', (e) => e.preventDefault());
+overlay.addEventListener('wheel', (e) => {
+  if (!desktopActive()) return;
+  e.preventDefault();
+  if (e.ctrlKey) { setZoom(currentZoom * (e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP), e.clientX, e.clientY) && applyTransform(false); return; }
+  const sx = e.deltaX ? (e.deltaX > 0 ? 1 : -1) : 0, sy = e.deltaY ? (e.deltaY > 0 ? 1 : -1) : 0;
+  (sx || sy) && sendInput({ type: 'mouse-scroll', dx: sx, dy: sy });
+}, { passive: false });
+const PHYS_MODS = ['Control', 'Shift', 'Alt', 'Meta'];
+const PASS_KEYS = ['F5', 'F11', 'F12'];
+const kbCaptureOn = () => document.getElementById('viewer-screen').style.display !== 'none' && !['INPUT', 'TEXTAREA'].includes((document.activeElement || {}).tagName);
+const physHeld = new Set();
+document.addEventListener('keydown', (e) => {
+  if (!kbCaptureOn() || PASS_KEYS.includes(e.key)) return;
+  e.preventDefault();
+  if (e.repeat && PHYS_MODS.includes(e.key)) return;
+  physHeld.add(e.key);
+  sendInput({ type: 'key-down', key: e.key });
+});
+document.addEventListener('keyup', (e) => {
+  if (PASS_KEYS.includes(e.key)) return;
+  physHeld.delete(e.key);
+  if (!kbCaptureOn()) return;
+  e.preventDefault();
+  sendInput({ type: 'key-up', key: e.key });
+});
+const releaseHeld = () => { physHeld.forEach(k => sendInput({ type: 'key-up', key: k })); physHeld.clear(); };
+window.addEventListener('blur', releaseHeld);
 
 const KB_ROWS_LOWER = ['1234567890', 'qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
 const KB_ROWS_UPPER = ['!@#$%^&*()', 'QWERTYUIOP', 'ASDFGHJKL', 'ZXCVBNM'];
@@ -587,17 +758,31 @@ function renderKbMods() {
   });
 }
 
-function bindPress(el, fn) {
+let repStop = null;
+function stopRepeat() { if (repStop) { repStop(); repStop = null; } }
+function bindPress(el, fn, repeat) {
   let fired = false;
+  el.style.touchAction = 'none';
+  el.style.webkitUserSelect = 'none';
+  el.style.userSelect = 'none';
+  el.style.webkitTouchCallout = 'none';
+  el.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); });
+  el.addEventListener('selectstart', (e) => e.preventDefault());
   el.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     if (fired) return;
-    fired = true;
-    fn();
+    fired = true; fn();
     setTimeout(() => { fired = false; }, 40);
+    if (repeat) {
+      stopRepeat();
+      const hold = setTimeout(() => { const iv = setInterval(fn, 55); repStop = () => clearInterval(iv); }, 380);
+      repStop = () => clearTimeout(hold);
+    }
   });
   el.addEventListener('click', (e) => e.preventDefault());
 }
+document.addEventListener('pointerup', stopRepeat);
+document.addEventListener('pointercancel', stopRepeat);
 
 function renderKbKeys() {
   const rows = kbLayout === 'sym' ? KB_ROWS_SYM : (kbShift || kbCaps ? KB_ROWS_UPPER : KB_ROWS_LOWER);
@@ -616,14 +801,14 @@ function renderKbKeys() {
       const b = document.createElement('button');
       b.className = 'kb-key';
       b.textContent = ch;
-      bindPress(b, () => tapChar(ch));
+      bindPress(b, () => tapChar(ch), true);
       rowEl.appendChild(b);
     }
     if (idx === 3) {
       const bk = document.createElement('button');
       bk.className = 'kb-key kb-mod';
       bk.textContent = '\u232B';
-      bindPress(bk, () => tapSpecial('Backspace'));
+      bindPress(bk, () => tapSpecial('Backspace'), true);
       rowEl.appendChild(bk);
     }
     kbKeysEl.appendChild(rowEl);
@@ -637,7 +822,7 @@ function renderKbKeys() {
   const sp = document.createElement('button');
   sp.className = 'kb-key kb-space';
   sp.textContent = 'space';
-  bindPress(sp, () => tapChar(' '));
+  bindPress(sp, () => tapChar(' '), true);
   const en = document.createElement('button');
   en.className = 'kb-key kb-mod';
   en.textContent = '\u23CE';
@@ -709,11 +894,11 @@ function clearKb() {
 }
 
 document.querySelectorAll('#kb-mods .mod-btn').forEach(btn => {
+  const m = btn.dataset.mod;
   bindPress(btn, () => {
-    const m = btn.dataset.mod;
     if (m in kbMods) { kbMods[m] = !kbMods[m]; renderKbMods(); }
     else tapSpecial(m);
-  });
+  }, m.indexOf('Arrow') === 0);
 });
 const kbClearBtn = document.querySelector('.kb-clear-btn');
 if (kbClearBtn) { kbClearBtn.onclick = null; bindPress(kbClearBtn, clearKb); }
@@ -739,10 +924,12 @@ function sendClipboard() {
 }
 
 function disconnect() {
+  wantStay = false;
   pc?.close(); socket?.disconnect(); stopViewerStats();
   document.getElementById('viewer-screen').style.display = 'none';
   document.getElementById('connect-screen').style.display = 'flex';
   setStatus('Disconnected');
+  paintLinkChips();
 }
 
 function toggleMode() {

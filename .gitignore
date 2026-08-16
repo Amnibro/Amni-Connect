@@ -25,6 +25,7 @@ out/
 
 # Dev-only scratch
 backups/
+docs/checklists/
 *.bak
 *.log
 *.tmp

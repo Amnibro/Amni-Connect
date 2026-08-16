@@ -6,12 +6,14 @@
     <title>Amni-Connect &bull; E2EE Remote Desktop</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
-        :root { --primary: #6366f1; --primary-dark: #4f46e5; }
+        :root { --primary: #5A48B0; --primary-dark: #463890; --paper:#0A0B0E; --surface:#161a22; --you:#C89B4E; --ink:#eef1f6; --line:#2a3140; --mut:#9aa3b2; }
         * { box-sizing: border-box; }
-        body { margin: 0; font-family: 'Inter', system-ui, sans-serif; background: linear-gradient(135deg, #1e2937, #0f172a); color: #e2e8f0; height: 100vh; overflow: hidden; }
+        body { margin: 0; font-family: system-ui, Segoe UI, sans-serif; background: var(--paper); color: var(--ink); height: 100vh; overflow: hidden; }
         .container { display: flex; flex-direction: column; height: 100vh; }
-        header { flex-shrink: 0; background: rgba(15,23,42,0.8); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #334155; backdrop-filter: blur(12px); }
-        .logo { font-size: 20px; font-weight: 700; color: white; display: flex; align-items: center; gap: 10px; }
+        header { flex-shrink: 0; background: color-mix(in srgb,var(--surface) 92%,transparent); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); backdrop-filter: blur(12px); gap: 12px; }
+        .logo { font-size: 20px; font-weight: 700; color: var(--you); display: flex; align-items: center; gap: 10px; letter-spacing: -.02em; }
+        .hdr-chips { display:inline-flex; gap:6px; flex-wrap:wrap; }
+        .hdr-chips span { font:650 10px/1.1 ui-monospace,Consolas,monospace; padding:4px 8px; border-radius:999px; border:1px solid var(--line); color:var(--mut); }
         .status { padding: 6px 16px; border-radius: 9999px; font-size: 13px; font-weight: 500; background: #64748b; }
         .main { flex: 1; display: flex; padding: 20px; gap: 20px; overflow: hidden; min-height: 0; }
         .panel { background: rgba(15,23,42,0.6); border-radius: 14px; padding: 20px; border: 1px solid #334155; backdrop-filter: blur(12px); width: 320px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
@@ -73,7 +75,8 @@
 <body>
     <div class="container">
         <header>
-            <div class="logo">&#128274; Amni-Connect</div>
+            <div class="logo">Amni-Connect</div>
+            <div class="hdr-chips" id="hdrChips"><span id="chipSig">sig —</span><span id="chipRtc">rtc —</span><span id="chipIn">input —</span></div>
             <div id="status" class="status">Disconnected</div>
         </header>
         <div class="main">
@@ -95,6 +98,7 @@
                     </div>
                     <div id="activeSession" style="display:none;">
                         <div class="room-code" id="displayCode">———</div>
+                        <img id="pairQr" alt="Scan to join" style="display:none;width:160px;height:160px;background:#fff;border-radius:8px;padding:6px;margin:8px auto;object-fit:contain">
                         <div class="btn-row">
                             <button class="success" onclick="copyCode()">&#128203; Code</button>
                             <button class="info" onclick="copyLink()">&#128279; Link</button>
@@ -124,8 +128,8 @@
                     </div>
                     <div class="setting-row">
                         <label>Bitrate</label>
-                        <input type="range" id="qualitySlider" min="500" max="20000" step="500" value="8000" oninput="onSliderInput()">
-                        <span class="quality-val" id="qualityLabel">8 Mbps</span>
+                        <input type="range" id="qualitySlider" min="500" max="20000" step="500" value="4000" oninput="onSliderInput()">
+                        <span class="quality-val" id="qualityLabel">4 Mbps</span>
                     </div>
                     <div id="autoHint" class="auto-hint">&#128640; Auto-adapting to network</div>
                     <div class="toggle-row">
@@ -274,8 +278,12 @@
         }
 
         function initSocket() {
-            socket = io(SIGNALING_URL, { transports: ['websocket'] });
-            socket.on('connect', () => log('Signaling server connected', 'success'));
+            socket = io(SIGNALING_URL, { transports: ['websocket','polling'] });
+            socket.on('connect', () => {
+                log('Signaling server connected', 'success');
+                paintHostChips();
+                if (isHost && roomId) { socket.emit('create-room', roomId); log(`Reclaimed room ${roomId} after reconnect`, 'success'); }
+            });
             socket.on('connect_error', () => log('Cannot reach signaling server — is it running?', 'error'));
             socket.on('offer', async ({ offer }) => {
                 if (!pc) createPC();
@@ -293,11 +301,40 @@
             socket.on('host-disconnected', () => { log('Host disconnected', 'error'); setStatus('Disconnected', '#ef4444'); });
         }
 
-        let dataChannel;
+        let dataChannel, hostIceTries = 0, hostRecoverBusy = false;
+        function paintHostChips() {
+            const sig = document.getElementById('chipSig');
+            const rtc = document.getElementById('chipRtc');
+            const inn = document.getElementById('chipIn');
+            if (sig) sig.textContent = socket && socket.connected ? 'sig up' : 'sig down';
+            const st = pc ? pc.connectionState : 'idle';
+            if (rtc) rtc.textContent = 'rtc ' + st;
+            const inOpen = dataChannel && dataChannel.readyState === 'open';
+            if (inn) inn.textContent = inOpen ? 'input p2p' : (socket && socket.connected ? 'input relay' : 'input none');
+        }
+        async function recoverHostPc() {
+            if (hostRecoverBusy || !pc) return;
+            hostRecoverBusy = true;
+            try {
+                if (hostIceTries < 3) {
+                    hostIceTries++;
+                    log('ICE restart ' + hostIceTries);
+                    const offer = await pc.createOffer({ iceRestart: true });
+                    await pc.setLocalDescription(offer);
+                    socket.emit('offer', { roomId, offer });
+                }
+            } catch (e) { log('ICE restart failed: ' + e.message, 'error'); }
+            finally { hostRecoverBusy = false; paintHostChips(); }
+        }
         function createPC() {
             pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
             pc.onicecandidate = ({ candidate }) => candidate && socket.emit('ice-candidate', { roomId, candidate });
-            pc.onconnectionstatechange = () => { log(`WebRTC: ${pc.connectionState}`); if (pc.connectionState === 'connected') startStatsLoop(); };
+            pc.onconnectionstatechange = () => {
+                log(`WebRTC: ${pc.connectionState}`);
+                paintHostChips();
+                if (pc.connectionState === 'connected') startStatsLoop();
+                else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') recoverHostPc();
+            };
             pc.ontrack = ({ streams }) => {
                 remoteVideo.srcObject = streams[0];
                 remoteScreen.style.display = 'flex';
@@ -309,9 +346,14 @@
         }
 
         function setupDataChannel(channel) {
-            channel.onopen = () => { log('E2EE Data channel opened'); applyBitrate(); };
+            channel.onopen = () => { log('E2EE Data channel opened'); applyBitrate(); paintHostChips(); hostIceTries = 0; };
             channel.onmessage = async (e) => {
+                if (typeof e.data !== 'string') return;
                 const data = JSON.parse(e.data);
+                if (data.type === 'input') {
+                    if (isHost && !inputLocked && !document.getElementById('viewOnlyToggle').checked) window.electronAPI.sendInputEvent(data.ev);
+                    return;
+                }
                 if (data.type === 'clipboard-sync') {
                     isHost ? (window.electronAPI.writeClipboard(data.text), log('Host clipboard updated from viewer')) : console.log('Clipboard from host:', data.text);
                 }
@@ -376,8 +418,9 @@
                 const sig = signalLabel(AB.lastLoss, AB.lastRtt);
                 document.getElementById('signalText').textContent = sig.name;
                 document.getElementById('signalDot').style.background = sig.color;
+                paintHostChips();
                 autoTick();
-            }, 2000);
+            }, 500);
         }
 
         let availableSources = [];
@@ -385,6 +428,8 @@
             availableSources = sources;
             const select = document.getElementById('monitorSelect');
             sources.forEach(src => { const opt = document.createElement('option'); opt.value = src.id; opt.textContent = src.name; select.appendChild(opt); });
+            const autoCode = document.getElementById('customRoomCode').value.trim();
+            if (autoCode && sources.length && !isHost) { setMode('host'); createAndHost(); }
         });
 
         async function createAndHost() {
@@ -414,6 +459,7 @@
                 document.getElementById('viewerMode').style.display = 'none';
                 document.getElementById('modeSwitch').style.display = 'none';
                 document.getElementById('displayCode').textContent = roomId;
+                paintPairQr();
                 setStatus('Hosting \u2022 E2EE', '#22c55e');
                 setLiveSettings(true);
                 log(`Room ${roomId} created — sharing: ${src.name}`, 'success');
@@ -426,6 +472,9 @@
                 });
                 socket.on('input-event', (data) => {
                     if (!inputLocked && !document.getElementById('viewOnlyToggle').checked) window.electronAPI.sendInputEvent(data);
+                });
+                socket.on('file-received', (data) => {
+                    log(`Received file: ${data.name} (${(data.size / 1024).toFixed(1)} KB)`, 'success');
                 });
             });
         }
@@ -454,10 +503,23 @@
 
         function copyCode() { navigator.clipboard.writeText(roomId); log('Room code copied'); }
 
-        async function copyLink() {
+        async function pairUrl() {
             const ip = await window.electronAPI.getLocalIp();
-            const url = `http://${ip}:3389/viewer?host=${ip}&code=${roomId}`;
+            return `http://${ip}:3389/viewer?host=${ip}&code=${roomId}`;
+        }
+        async function paintPairQr() {
+            const img = document.getElementById('pairQr');
+            if (!img || !roomId) return;
+            try {
+                const url = await pairUrl();
+                img.src = 'http://127.0.0.1:3389/qr?url=' + encodeURIComponent(url);
+                img.style.display = 'block';
+            } catch (e) { img.style.display = 'none'; }
+        }
+        async function copyLink() {
+            const url = await pairUrl();
             navigator.clipboard.writeText(url);
+            paintPairQr();
             log(`Mobile link copied: ${url}`, 'success');
         }
 
@@ -466,15 +528,41 @@
         }
 
         const overlay = document.getElementById('inputOverlay');
-        overlay.addEventListener('mousemove', (e) => {
-            if (isHost || !roomId || document.getElementById('viewOnlyToggle').checked) return;
-            const r = overlay.getBoundingClientRect();
-            window.electronAPI.sendInputEvent({ type: 'mouse-move', x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height, roomId });
+        const joinCtl = () => !isHost && roomId && !document.getElementById('viewOnlyToggle').checked;
+        const sendIn = (ev) => {
+            if (dataChannel && dataChannel.readyState === 'open') { try { dataChannel.send(JSON.stringify({ type: 'input', ev })); return; } catch (e) {} }
+            if (socket && socket.connected && roomId) { socket.emit('input-event', { ...ev, roomId }); return; }
+        };
+        function joinCoord(e) {
+            const v = document.getElementById('remoteVideo'), r = overlay.getBoundingClientRect(), vw = v.videoWidth, vh = v.videoHeight;
+            if (!vw || !vh) return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+            const cAR = r.width / r.height, vAR = vw / vh, dW = vAR > cAR ? r.width : r.height * vAR, dH = vAR > cAR ? r.width / vAR : r.height, left = r.left + (r.width - dW) / 2, top = r.top + (r.height - dH) / 2;
+            return { x: Math.max(0, Math.min(1, (e.clientX - left) / dW)), y: Math.max(0, Math.min(1, (e.clientY - top) / dH)) };
+        }
+        let joinHeld = false;
+        overlay.addEventListener('mousemove', (e) => { if (!joinCtl()) return; const sc = joinCoord(e); sendIn({ type: 'mouse-move', x: sc.x, y: sc.y }); });
+        overlay.addEventListener('mousedown', (e) => {
+            if (!joinCtl()) return;
+            e.preventDefault();
+            const sc = joinCoord(e); sendIn({ type: 'mouse-move', x: sc.x, y: sc.y });
+            e.button === 2 ? sendIn({ type: 'mouse-right-click' }) : e.button === 1 ? sendIn({ type: 'mouse-middle-click' }) : (joinHeld = true, sendIn({ type: 'mouse-down' }));
         });
-        overlay.addEventListener('click', () => { if (!isHost && roomId && !document.getElementById('viewOnlyToggle').checked) window.electronAPI.sendInputEvent({ type: 'mouse-click', roomId }); });
-        overlay.addEventListener('contextmenu', (e) => { e.preventDefault(); if (!isHost && roomId && !document.getElementById('viewOnlyToggle').checked) window.electronAPI.sendInputEvent({ type: 'mouse-right-click', roomId }); });
-        document.addEventListener('keydown', (e) => { if (!isHost && roomId && !document.getElementById('viewOnlyToggle').checked) window.electronAPI.sendInputEvent({ type: 'key-down', key: e.key, roomId }); });
-        document.addEventListener('keyup', (e) => { if (!isHost && roomId && !document.getElementById('viewOnlyToggle').checked) window.electronAPI.sendInputEvent({ type: 'key-up', key: e.key, roomId }); });
+        const joinEndMouse = () => { if (joinHeld) { joinHeld = false; sendIn({ type: 'mouse-up' }); } };
+        overlay.addEventListener('mouseup', (e) => { if (!joinCtl()) return; e.preventDefault(); (e.button === 0) && joinEndMouse(); });
+        overlay.addEventListener('mouseleave', joinEndMouse);
+        overlay.addEventListener('contextmenu', (e) => e.preventDefault());
+        overlay.addEventListener('wheel', (e) => {
+            if (!joinCtl()) return;
+            e.preventDefault();
+            const sx = e.deltaX ? (e.deltaX > 0 ? 1 : -1) : 0, sy = e.deltaY ? (e.deltaY > 0 ? 1 : -1) : 0;
+            (sx || sy) && sendIn({ type: 'mouse-scroll', dx: sx, dy: sy });
+        }, { passive: false });
+        const joinEditable = () => ['INPUT', 'TEXTAREA', 'SELECT'].includes((document.activeElement || {}).tagName);
+        const JOIN_PASS = ['F5', 'F11', 'F12'];
+        const joinHeldKeys = new Set();
+        document.addEventListener('keydown', (e) => { if (!joinCtl() || joinEditable() || JOIN_PASS.includes(e.key)) return; e.preventDefault(); joinHeldKeys.add(e.key); sendIn({ type: 'key-down', key: e.key }); });
+        document.addEventListener('keyup', (e) => { if (JOIN_PASS.includes(e.key)) return; joinHeldKeys.delete(e.key); if (!joinCtl()) return; e.preventDefault(); sendIn({ type: 'key-up', key: e.key }); });
+        window.addEventListener('blur', () => { if (!joinCtl()) return; joinHeldKeys.forEach(k => sendIn({ type: 'key-up', key: k })); joinHeldKeys.clear(); joinEndMouse(); });
 
         window.electronAPI?.onStatusUpdate?.(msg => log(msg));
         document.getElementById('autoHint').classList.toggle('on', document.getElementById('autoBitrateToggle').checked);
