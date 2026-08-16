@@ -37,7 +37,7 @@
     "linux": {
       "target": ["AppImage", "deb"],
       "category": "Network",
-      "maintainer": "Amnibro <the maintainer (via GitHub)>",
+      "maintainer": "Amnibro <amnibro7@gmail.com>",
       "desktop": {
         "Name": "Amni-Connect",
         "Comment": "End-to-end encrypted remote desktop",
@@ -52,8 +52,8 @@
     "e2ee",
     "electron"
   ],
-  "author": "Amnibro (Amni-Scient) <the maintainer (via GitHub)>",
-  "homepage": "https://example.com/amni-connect",
+  "author": "Amnibro (Amni-Scient) <amnibro7@gmail.com>",
+  "homepage": "https://amni-scient.com/amni-connect",
   "repository": {
     "type": "git",
     "url": "https://github.com/amnibro/Amni-Connect.git"

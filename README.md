@@ -92,13 +92,13 @@ Not allowed (without a commercial license):
 - Reselling binaries or derivative products
 - Bundling into a for-profit offering
 
-> Source-available, not permissive. The source is public so you can trust it and self-host; the NC clause is how the project stays sustainable. Commercial licenses are cheap and friendly — email **the maintainer (via GitHub)**.
+> Source-available, not permissive. The source is public so you can trust it and self-host; the NC clause is how the project stays sustainable. Commercial licenses are cheap and friendly — email **amnibro7@gmail.com**.
 
 See [`LICENSE`](LICENSE) for the full text + trademark notice.
 
 ## Links
 
-- Product page — https://example.com/amni-connect
-- Privacy policy — https://example.com/privacy-connect
-- Contact — the maintainer (via GitHub)
+- Product page — https://amni-scient.com/amni-connect
+- Privacy policy — https://amni-scient.com/privacy-connect
+- Contact — amnibro7@gmail.com
 - Support — https://ko-fi.com/amnibro

@@ -5,7 +5,7 @@ edition = "2021"
 license-file = "../LICENSE"
 description = "Rust input daemon for Amni-Connect (E2EE remote desktop)"
 repository = "https://github.com/amnibro/Amni-Connect"
-authors = ["Amnibro (Amni-Scient) <the maintainer (via GitHub)>"]
+authors = ["Amnibro (Amni-Scient) <amnibro7@gmail.com>"]
 
 [dependencies]
 enigo = "0.2"
