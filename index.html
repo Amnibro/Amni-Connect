@@ -54,10 +54,13 @@
         .mon-flag { position: absolute; top: 5px; right: 5px; font: 700 9px/1 system-ui, sans-serif; background: var(--you); color: #0A0B0E; padding: 3px 6px; border-radius: 6px; letter-spacing: .4px; }
         .mon-empty { font-size: 12px; color: var(--mut); padding: 8px 0 12px; }
         .room-code { font-family: monospace; font-size: 26px; letter-spacing: 4px; background: #1e2937; padding: 12px 16px; border-radius: 10px; text-align: center; margin: 12px 0; color: #a5b4fc; border: 1.5px solid #334155; }
-        .log-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-        .log { font-size: 11px; background: #0a0f1a; padding: 10px 12px; border-radius: 8px; flex: 1; overflow-y: auto; font-family: monospace; line-height: 1.6; min-height: 80px; scrollbar-width: thin; scrollbar-color: #334155 transparent; }
+        .log-wrap { flex: 0 0 auto; height: 200px; display: flex; flex-direction: column; min-height: 0; }
+        .log { font-size: 11px; background: #0a0f1a; padding: 10px 12px; border-radius: 8px; flex: 1; overflow-y: auto; font-family: monospace; line-height: 1.6; min-height: 0; scrollbar-width: thin; scrollbar-color: #334155 transparent; }
         .log::-webkit-scrollbar { width: 4px; }
         .log::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        .v-resizer { flex: 0 0 auto; height: 11px; margin: 2px -20px 4px; display: flex; align-items: center; justify-content: center; cursor: row-resize; touch-action: none; outline: none; }
+        .v-resizer::before { content: ''; width: 44px; height: 3px; border-radius: 999px; background: #334155; transition: background .15s, width .15s; }
+        .v-resizer:hover::before, .v-resizer.drag::before, .v-resizer:focus-visible::before { background: var(--you); width: 68px; }
         .setting-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px; }
         .setting-row label { font-size: 12px; color: #94a3b8; font-weight: 500; flex-shrink: 0; }
         .setting-row select, .setting-row input[type=range] { margin-bottom: 0; flex: 1; }
@@ -179,8 +182,10 @@
                     </div>
                 </div>
 
+                <div class="v-resizer" id="panelResizer" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize. Double-click to reset."></div>
+
                 <div class="log-wrap">
-                    <h2 style="margin-top:16px;margin-bottom:8px;">&#128196; Connection Log</h2>
+                    <h2 style="margin-top:4px;margin-bottom:8px;">&#128196; Connection Log</h2>
                     <div id="log" class="log"></div>
                 </div>
             </div>
@@ -668,6 +673,85 @@
         window.electronAPI?.onStatusUpdate?.(msg => log(msg));
         document.getElementById('autoHint').classList.toggle('on', document.getElementById('autoBitrateToggle').checked);
         log('Amni-Connect initialized — End-to-End Encrypted', 'success');
+
+        // Panel splitter. The settings list and the log both carried flex:1, so they hard-split
+        // the panel 50/50 and the log ate half the height while you were still setting up.
+        // The log now owns an explicit height and this handle is what sets it.
+        (function panelSplitter() {
+            const panel = document.querySelector('.panel');
+            const logWrap = document.querySelector('.log-wrap');
+            const bar = document.getElementById('panelResizer');
+            if (!panel || !logWrap || !bar) return;
+            const KEY = 'amni-log-h', DEFAULT_H = 200, MIN_LOG = 52, MIN_SETTINGS = 140;
+            let padBottom = 0;
+
+            // clientHeight still includes the panel's own padding, and the handle carries
+            // vertical margins outside its offsetHeight. Miss either and the settings pane
+            // collapses past MIN_SETTINGS when you drag the handle to the top.
+            function px(v) { return parseFloat(v) || 0; }
+            function contentH() {
+                const cs = getComputedStyle(panel);
+                return panel.clientHeight - px(cs.paddingTop) - px(cs.paddingBottom);
+            }
+            function barOuterH() {
+                const cs = getComputedStyle(bar);
+                return bar.offsetHeight + px(cs.marginTop) + px(cs.marginBottom);
+            }
+            function clamp(h) {
+                const ch = contentH();
+                if (ch <= 0) return Math.round(Math.max(MIN_LOG, h));
+                const room = ch - MIN_SETTINGS - barOuterH();
+                return Math.round(Math.max(MIN_LOG, Math.min(h, Math.max(MIN_LOG, room))));
+            }
+            function currentH() {
+                return parseInt(logWrap.style.height, 10) || logWrap.offsetHeight || DEFAULT_H;
+            }
+            function setH(h, persist) {
+                const v = clamp(h);
+                logWrap.style.height = v + 'px';
+                bar.setAttribute('aria-valuenow', String(v));
+                if (persist) localStorage.setItem(KEY, String(v));
+                return v;
+            }
+
+            const saved = parseInt(localStorage.getItem(KEY), 10);
+            setH(Number.isFinite(saved) ? saved : DEFAULT_H, false);
+
+            let dragging = false;
+            bar.addEventListener('pointerdown', e => {
+                dragging = true;
+                padBottom = parseFloat(getComputedStyle(panel).paddingBottom) || 0;
+                bar.classList.add('drag');
+                document.body.style.userSelect = 'none';
+                try { bar.setPointerCapture(e.pointerId); } catch (_) {}
+                e.preventDefault();
+            });
+            bar.addEventListener('pointermove', e => {
+                if (!dragging) return;
+                setH(panel.getBoundingClientRect().bottom - padBottom - e.clientY, false);
+            });
+            function endDrag(e) {
+                if (!dragging) return;
+                dragging = false;
+                bar.classList.remove('drag');
+                document.body.style.userSelect = '';
+                try { bar.releasePointerCapture(e.pointerId); } catch (_) {}
+                localStorage.setItem(KEY, String(currentH()));
+            }
+            bar.addEventListener('pointerup', endDrag);
+            bar.addEventListener('pointercancel', endDrag);
+            bar.addEventListener('dblclick', () => setH(DEFAULT_H, true));
+            bar.addEventListener('keydown', e => {
+                const step = e.shiftKey ? 48 : 16;
+                if (e.key === 'ArrowUp') setH(currentH() + step, true);
+                else if (e.key === 'ArrowDown') setH(currentH() - step, true);
+                else return;
+                e.preventDefault();
+                e.stopPropagation();
+            });
+            // A shorter window must not leave the log taller than the panel it lives in.
+            window.addEventListener('resize', () => setH(currentH(), false));
+        })();
     </script>
 </body>
 </html>
