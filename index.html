@@ -36,6 +36,23 @@
         #remoteScreen { flex: 1; background: #000; border-radius: 14px; overflow: hidden; position: relative; border: 1px solid #334155; display: none; }
         #remoteScreen video { width: 100%; height: 100%; object-fit: contain; }
         .overlay { position: absolute; inset: 0; pointer-events: none; }
+        .mon-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; }
+        .mon-head > span { font-size: 11px; color: var(--mut); font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; }
+        .mon-refresh { width: auto; margin: 0; padding: 5px 10px; font-size: 11px; background: #475569; border-radius: 8px; }
+        .mon-refresh:hover { background: #5b6b80; }
+        .mon-refresh:disabled { opacity: .55; cursor: default; }
+        .mon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(126px, 1fr)); gap: 8px; margin-bottom: 10px; }
+        .mon-card { position: relative; width: 100%; margin: 0; padding: 0; background: #1e2937; border: 1.5px solid #475569; border-radius: 10px; overflow: hidden; cursor: pointer; text-align: left; transition: border-color .15s, transform .15s; }
+        .mon-card:hover { background: #1e2937; border-color: #6366f1; transform: translateY(-1px); }
+        .mon-card.sel { border-color: var(--you); box-shadow: 0 0 0 2px color-mix(in srgb, var(--you) 32%, transparent); }
+        .mon-card img, .mon-card .mon-none { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #000; }
+        .mon-card .mon-none { display: flex; align-items: center; justify-content: center; background: #0f141c; color: var(--mut); font-size: 10px; }
+        .mon-meta { display: block; padding: 6px 8px; }
+        .mon-name { display: block; font-size: 11px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .mon-sub { display: block; font: 400 10px/1.4 ui-monospace, Consolas, monospace; color: var(--mut); }
+        .mon-badge { position: absolute; top: 5px; left: 5px; font: 700 10px/1 ui-monospace, Consolas, monospace; background: rgba(10,11,14,.82); color: var(--ink); border: 1px solid var(--line); padding: 3px 6px; border-radius: 6px; }
+        .mon-flag { position: absolute; top: 5px; right: 5px; font: 700 9px/1 system-ui, sans-serif; background: var(--you); color: #0A0B0E; padding: 3px 6px; border-radius: 6px; letter-spacing: .4px; }
+        .mon-empty { font-size: 12px; color: var(--mut); padding: 8px 0 12px; }
         .room-code { font-family: monospace; font-size: 26px; letter-spacing: 4px; background: #1e2937; padding: 12px 16px; border-radius: 10px; text-align: center; margin: 12px 0; color: #a5b4fc; border: 1.5px solid #334155; }
         .log-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
         .log { font-size: 11px; background: #0a0f1a; padding: 10px 12px; border-radius: 8px; flex: 1; overflow-y: auto; font-family: monospace; line-height: 1.6; min-height: 80px; scrollbar-width: thin; scrollbar-color: #334155 transparent; }
@@ -89,7 +106,9 @@
                     </div>
                     <div id="hostMode">
                         <input type="text" id="customRoomCode" placeholder="Optional: Persistent Room Code" style="text-transform:uppercase">
-                        <select id="monitorSelect"></select>
+                        <select id="monitorSelect" style="display:none"></select>
+                        <div class="mon-head"><span>Screen to share</span><button type="button" class="mon-refresh" id="monRefresh" onclick="loadSources(true)">&#8635; Refresh</button></div>
+                        <div class="mon-grid" id="monitorGrid"></div>
                         <button onclick="createAndHost()">&#128640; Start Hosting (Share Screen)</button>
                     </div>
                     <div id="viewerMode" style="display:none;">
@@ -423,14 +442,96 @@
             }, 500);
         }
 
+        const MON_REFRESH_MS = 3000;
         let availableSources = [];
-        window.electronAPI.getSources().then(sources => {
-            availableSources = sources;
-            const select = document.getElementById('monitorSelect');
-            sources.forEach(src => { const opt = document.createElement('option'); opt.value = src.id; opt.textContent = src.name; select.appendChild(opt); });
-            const autoCode = document.getElementById('customRoomCode').value.trim();
-            if (autoCode && sources.length && !isHost) { setMode('host'); createAndHost(); }
-        });
+        let selectedSourceId = null;
+        let sourcesLoadedOnce = false;
+
+        function escHtml(s) {
+            return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        // The hidden <select> stays the single source of truth for createAndHost(),
+        // so the picker below is purely a nicer way to set it.
+        function selectSource(id) {
+            selectedSourceId = id;
+            document.getElementById('monitorSelect').value = id;
+            document.querySelectorAll('#monitorGrid .mon-card').forEach(c => c.classList.toggle('sel', c.dataset.id === id));
+        }
+
+        function renderMonitorGrid() {
+            const grid = document.getElementById('monitorGrid');
+            if (!availableSources.length) {
+                grid.innerHTML = '<div class="mon-empty">No screens detected. Click Refresh.</div>';
+                return;
+            }
+            if (!availableSources.some(s => s.id === selectedSourceId)) selectedSourceId = availableSources[0].id;
+            grid.innerHTML = availableSources.map(s => {
+                const dims = s.width && s.height ? s.width + '\u00d7' + s.height : '';
+                const shot = s.thumbnail ? '<img alt="" src="' + s.thumbnail + '">' : '<div class="mon-none">no preview</div>';
+                return '<button type="button" class="mon-card' + (s.id === selectedSourceId ? ' sel' : '') + '"'
+                    + ' data-id="' + escHtml(s.id) + '" title="' + escHtml(s.name) + '">'
+                    + shot
+                    + '<span class="mon-badge">' + s.index + '</span>'
+                    + (s.primary ? '<span class="mon-flag">MAIN</span>' : '')
+                    + '<span class="mon-meta"><span class="mon-name">' + escHtml(s.name) + '</span>'
+                    + '<span class="mon-sub">' + dims + '</span></span>'
+                    + '</button>';
+            }).join('');
+            grid.querySelectorAll('.mon-card').forEach(c => c.addEventListener('click', () => selectSource(c.dataset.id)));
+            document.getElementById('monitorSelect').value = selectedSourceId;
+        }
+
+        // Swap thumbnail pixels in place when the screen list itself has not changed.
+        // Rebuilding innerHTML every tick would make the previews flicker and drop the selection ring.
+        function refreshThumbs() {
+            document.querySelectorAll('#monitorGrid .mon-card').forEach(card => {
+                const s = availableSources.find(x => x.id === card.dataset.id);
+                const img = card.querySelector('img');
+                if (s && s.thumbnail && img) img.src = s.thumbnail;
+            });
+        }
+
+        function sameScreenSet(a, b) {
+            return a.length === b.length && a.every((s, i) => s.id === b[i].id && s.name === b[i].name);
+        }
+
+        async function loadSources(manual) {
+            const btn = document.getElementById('monRefresh');
+            if (manual && btn) { btn.disabled = true; btn.textContent = '\u2026'; }
+            try {
+                const sources = await window.electronAPI.getSources();
+                const prev = availableSources;
+                availableSources = sources;
+                if (sameScreenSet(prev, sources) && document.querySelector('#monitorGrid .mon-card')) {
+                    refreshThumbs();
+                } else {
+                    const select = document.getElementById('monitorSelect');
+                    select.innerHTML = '';
+                    sources.forEach(s => { const o = document.createElement('option'); o.value = s.id; o.textContent = s.name; select.appendChild(o); });
+                    renderMonitorGrid();
+                    if (manual) log('Found ' + sources.length + ' screen' + (sources.length === 1 ? '' : 's'), 'success');
+                }
+                if (!sourcesLoadedOnce) {
+                    sourcesLoadedOnce = true;
+                    const autoCode = document.getElementById('customRoomCode').value.trim();
+                    if (autoCode && sources.length && !isHost) { setMode('host'); createAndHost(); }
+                }
+            } catch (e) {
+                log('Could not list screens: ' + (e && e.message ? e.message : e), 'error');
+            } finally {
+                if (manual && btn) { btn.disabled = false; btn.innerHTML = '&#8635; Refresh'; }
+            }
+        }
+
+        loadSources(false);
+        // Tick only while the picker is actually on screen and idle. Once hosting starts the host
+        // panel is hidden, so this stops paying for captures nobody is looking at.
+        setInterval(() => {
+            if (document.hidden || isHost || !document.hasFocus()) return;
+            if (document.getElementById('hostMode').style.display === 'none') return;
+            loadSources(false);
+        }, MON_REFRESH_MS);
 
         async function createAndHost() {
             initSocket();
