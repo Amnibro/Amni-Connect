@@ -53,6 +53,14 @@
         .mon-badge { position: absolute; top: 5px; left: 5px; font: 700 10px/1 ui-monospace, Consolas, monospace; background: rgba(10,11,14,.82); color: var(--ink); border: 1px solid var(--line); padding: 3px 6px; border-radius: 6px; }
         .mon-flag { position: absolute; top: 5px; right: 5px; font: 700 9px/1 system-ui, sans-serif; background: var(--you); color: #0A0B0E; padding: 3px 6px; border-radius: 6px; letter-spacing: .4px; }
         .mon-empty { font-size: 12px; color: var(--mut); padding: 8px 0 12px; }
+        .pair-addr { margin: 10px 0 6px; text-align: left; }
+        .pair-addr label { display: block; font-size: 11px; color: var(--mut); font-weight: 600; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 6px; }
+        .pair-row { display: flex; gap: 6px; align-items: stretch; }
+        .pair-row input { flex: 1; min-width: 0; margin-bottom: 0; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
+        .pair-reset { width: auto; flex-shrink: 0; margin: 0; padding: 0 12px; background: #475569; border-radius: 10px; font-size: 14px; }
+        .pair-reset:hover { background: #5b6b80; }
+        .pair-hint { margin-top: 6px; font: 400 10px/1.5 ui-monospace, Consolas, monospace; color: var(--mut); word-break: break-all; }
+        .pair-hint.warn { color: #fbbf24; }
         .room-code { font-family: monospace; font-size: 26px; letter-spacing: 4px; background: #1e2937; padding: 12px 16px; border-radius: 10px; text-align: center; margin: 12px 0; color: #a5b4fc; border: 1.5px solid #334155; }
         .log-wrap { flex: 0 0 auto; height: 200px; display: flex; flex-direction: column; min-height: 0; }
         .log { font-size: 11px; background: #0a0f1a; padding: 10px 12px; border-radius: 8px; flex: 1; overflow-y: auto; font-family: monospace; line-height: 1.6; min-height: 0; scrollbar-width: thin; scrollbar-color: #334155 transparent; }
@@ -120,6 +128,14 @@
                     </div>
                     <div id="activeSession" style="display:none;">
                         <div class="room-code" id="displayCode">———</div>
+                        <div class="pair-addr">
+                            <label for="pairHost">Pairing address</label>
+                            <div class="pair-row">
+                                <input type="text" id="pairHost" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="detecting…">
+                                <button type="button" class="pair-reset" id="pairReset" title="Reset to the detected LAN address">&#8635;</button>
+                            </div>
+                            <div class="pair-hint" id="pairHint"></div>
+                        </div>
                         <img id="pairQr" alt="Scan to join" style="display:none;width:160px;height:160px;background:#fff;border-radius:8px;padding:6px;margin:8px auto;object-fit:contain">
                         <div class="btn-row">
                             <button class="success" onclick="copyCode()">&#128203; Code</button>
@@ -609,19 +625,82 @@
 
         function copyCode() { navigator.clipboard.writeText(roomId); log('Room code copied'); }
 
-        async function pairUrl() {
-            const ip = await window.electronAPI.getLocalIp();
-            return `http://${ip}:3389/viewer?host=${ip}&code=${roomId}`;
+        // The link and QR used to hardcode getLocalIp(), which is always a private LAN
+        // address, so neither could ever work off the network. The address is now yours to
+        // set: LAN IP, Tailscale IP, DDNS name, or a full https:// origin behind a proxy.
+        let detectedIp = '';
+        const PAIR_KEY = 'amni-pair-host';
+
+        // Accepts "1.2.3.4", "host:34389", "https://rd.example.com". Port defaults to 3389
+        // for http so the plain-IP case keeps working, and is left implicit for https so a
+        // reverse proxy on 443 does not get a stray :3389 glued on.
+        function parsePairTarget() {
+            const el = document.getElementById('pairHost');
+            let raw = ((el && el.value) || '').trim() || detectedIp || 'localhost';
+            raw = raw.replace(/\/+$/, '');
+            let proto = 'http';
+            const m = raw.match(/^(https?):\/\/(.+)$/i);
+            if (m) { proto = m[1].toLowerCase(); raw = m[2]; }
+            const pm = raw.match(/^(.+):(\d{1,5})$/);
+            let host = raw, port = '';
+            if (pm) { host = pm[1]; port = pm[2]; }
+            else if (proto === 'http') port = '3389';
+            return { proto, host, port, authority: port ? host + ':' + port : host };
         }
+
+        function isPrivateAddr(h) {
+            return /^(localhost$|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(h);
+        }
+
+        async function pairUrl() {
+            const t = parsePairTarget();
+            return `${t.proto}://${t.authority}/viewer?host=${encodeURIComponent(t.host)}&code=${roomId}`;
+        }
+
         async function paintPairQr() {
             const img = document.getElementById('pairQr');
+            const hint = document.getElementById('pairHint');
             if (!img || !roomId) return;
+            let url = '';
             try {
-                const url = await pairUrl();
+                url = await pairUrl();
+                // The QR itself is always rendered by the local server, whatever the link points at.
                 img.src = 'http://127.0.0.1:3389/qr?url=' + encodeURIComponent(url);
                 img.style.display = 'block';
             } catch (e) { img.style.display = 'none'; }
+            if (hint) {
+                const priv = isPrivateAddr(parsePairTarget().host);
+                hint.textContent = (priv ? 'LAN only \u2022 ' : '') + url;
+                hint.classList.toggle('warn', priv);
+                hint.title = priv ? 'Private address. This link only works on your own network.' : '';
+            }
         }
+
+        function setPairHost(v, persist) {
+            const el = document.getElementById('pairHost');
+            if (!el) return;
+            el.value = v;
+            if (persist) localStorage.setItem(PAIR_KEY, v);
+            paintPairQr();
+        }
+
+        (async function initPairHost() {
+            try { detectedIp = await window.electronAPI.getLocalIp(); } catch (_) { detectedIp = 'localhost'; }
+            const el = document.getElementById('pairHost');
+            if (!el) return;
+            el.placeholder = detectedIp;
+            const saved = (localStorage.getItem(PAIR_KEY) || '').trim();
+            el.value = saved || detectedIp;
+            let debounce = null;
+            el.addEventListener('input', () => {
+                localStorage.setItem(PAIR_KEY, el.value.trim());
+                clearTimeout(debounce);
+                debounce = setTimeout(paintPairQr, 350);
+            });
+            const reset = document.getElementById('pairReset');
+            if (reset) reset.addEventListener('click', () => setPairHost(detectedIp, true));
+            paintPairQr();
+        })();
         async function copyLink() {
             const url = await pairUrl();
             navigator.clipboard.writeText(url);
