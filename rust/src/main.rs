@@ -1,3 +1,7 @@
+mod wire;
+#[cfg(windows)]
+mod capture;
+
 use enigo::{Axis, Button, Coordinate, Direction, Enigo, InputError, Key, Keyboard, Mouse, Settings};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
@@ -20,6 +24,7 @@ struct InputEvent {
     dx: Option<f64>,
     dy: Option<f64>,
     key: Option<String>,
+    code: Option<String>,
     room_id: Option<String>,
 }
 #[cfg(windows)]
@@ -29,6 +34,36 @@ fn set_cursor(x: i32, y: i32) -> bool {
 #[cfg(not(windows))]
 fn set_cursor(_x: i32, _y: i32) -> bool {
     false
+}
+fn shift_base(c: char) -> Option<char> {
+    match c {
+        'A'..='Z' => Some(c.to_ascii_lowercase()),
+        '!' => Some('1'),
+        '@' => Some('2'),
+        '#' => Some('3'),
+        '$' => Some('4'),
+        '%' => Some('5'),
+        '^' => Some('6'),
+        '&' => Some('7'),
+        '*' => Some('8'),
+        '(' => Some('9'),
+        ')' => Some('0'),
+        '_' => Some('-'),
+        '+' => Some('='),
+        '{' => Some('['),
+        '}' => Some(']'),
+        '|' => Some('\\'),
+        ':' => Some(';'),
+        '"' => Some('\''),
+        '<' => Some(','),
+        '>' => Some('.'),
+        '?' => Some('/'),
+        '~' => Some('`'),
+        _ => None,
+    }
+}
+fn wants_shift(s: &str) -> bool {
+    s.chars().count() == 1 && s.chars().next().and_then(shift_base).is_some()
 }
 fn key_from_str(s: &str) -> Option<Key> {
     match s {
@@ -49,7 +84,24 @@ fn key_from_str(s: &str) -> Option<Key> {
         "Shift" => Some(Key::Shift),
         "Alt" => Some(Key::Alt),
         "Meta" | "Win" | "Cmd" | "Super" => Some(Key::Meta),
-        s if s.len() == 1 => s.chars().next().map(Key::Unicode),
+        " " | "Space" => Some(Key::Unicode(' ')),
+        "CapsLock" => Some(Key::CapsLock),
+        "Insert" => Some(Key::Insert),
+        "F1" => Some(Key::F1),
+        "F2" => Some(Key::F2),
+        "F3" => Some(Key::F3),
+        "F4" => Some(Key::F4),
+        "F5" => Some(Key::F5),
+        "F6" => Some(Key::F6),
+        "F7" => Some(Key::F7),
+        "F8" => Some(Key::F8),
+        "F9" => Some(Key::F9),
+        "F10" => Some(Key::F10),
+        "F11" => Some(Key::F11),
+        "F12" => Some(Key::F12),
+        s if s.chars().count() == 1 => s.chars().next().map(|c| Key::Unicode(shift_base(c).unwrap_or(c))),
+        s if s.starts_with("Key") && s.len() == 4 => s.chars().nth(3).map(|c| Key::Unicode(c.to_ascii_lowercase())),
+        s if s.starts_with("Digit") && s.len() == 6 => s.chars().nth(5).map(Key::Unicode),
         _ => None,
     }
 }
@@ -63,12 +115,18 @@ struct Ctl {
     direct: bool,
     last: String,
     pending: Option<(i32, i32, Instant)>,
+    shift_held: bool,
+    auto_shift: bool,
 }
 impl Ctl {
     fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let eng = Enigo::new(&Settings::default())?;
         let (sw, sh) = eng.main_display().unwrap_or((1920, 1080));
-        Ok(Self { eng, sw, sh, errs: 0, rebuilds: 0, misses: 0, direct: false, last: String::new(), pending: None })
+        Ok(Self { eng, sw, sh, errs: 0, rebuilds: 0, misses: 0, direct: false, last: String::new(), pending: None, shift_held: false, auto_shift: false })
+    }
+    fn shift(&mut self, down: bool, what: &str) {
+        let r = self.eng.key(Key::Shift, if down { Direction::Press } else { Direction::Release });
+        self.note(what, r);
     }
     fn note(&mut self, what: &str, r: Result<(), InputError>) {
         match r {
@@ -211,16 +269,29 @@ fn apply(c: &mut Ctl, ev: &InputEvent) -> Option<String> {
                 }
             }
         }
-        "key-down" => {
-            if let Some(k) = ev.key.as_deref().and_then(key_from_str) {
-                let r = c.eng.key(k, Direction::Press);
-                c.note("key-down", r);
+        "key-down" | "key-up" => {
+            let down = ev.event_type == "key-down";
+            let raw = ev.key.as_deref().unwrap_or("");
+            let mapped = ev.key.as_deref().and_then(key_from_str).or_else(|| ev.code.as_deref().and_then(key_from_str));
+            if matches!(mapped, Some(Key::Shift)) {
+                c.shift_held = down;
+                c.auto_shift = false;
             }
-        }
-        "key-up" => {
-            if let Some(k) = ev.key.as_deref().and_then(key_from_str) {
-                let r = c.eng.key(k, Direction::Release);
-                c.note("key-up", r);
+            let need = wants_shift(raw) && !c.shift_held;
+            match mapped {
+                Some(k) => {
+                    if down && need {
+                        c.shift(true, "auto-shift-down");
+                        c.auto_shift = true;
+                    }
+                    let r = c.eng.key(k, if down { Direction::Press } else { Direction::Release });
+                    c.note(if down { "key-down" } else { "key-up" }, r);
+                    if !down && c.auto_shift {
+                        c.shift(false, "auto-shift-up");
+                        c.auto_shift = false;
+                    }
+                }
+                None => eprintln!("[amni-control] unmapped {} key={:?} code={:?}", ev.event_type, ev.key, ev.code),
             }
         }
         _ => {}
@@ -228,6 +299,22 @@ fn apply(c: &mut Ctl, ev: &InputEvent) -> Option<String> {
     c.heal();
     None
 }
+fn capture_command(line: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    let t = v.get("type")?.as_str()?;
+    if !matches!(t, "capture-start" | "capture-stop" | "capture-idr" | "capture-status" | "capture-update") {
+        return None;
+    }
+    #[cfg(windows)]
+    {
+        return Some(capture::command(&v));
+    }
+    #[cfg(not(windows))]
+    {
+        Some(format!("{{\"type\":\"capture-status\",\"ok\":false,\"reason\":\"unsupported\"}}\n"))
+    }
+}
+
 fn spawn_watchdog(ctl: Arc<Mutex<Ctl>>) {
     std::thread::spawn(move || {
         let mut stuck = 0;
@@ -250,9 +337,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ctl = Arc::new(Mutex::new(Ctl::new()?));
     {
         let c = lock_ctl(&ctl);
-        eprintln!("[amni-control] v1.5.2 ready display {}x{}", c.sw, c.sh);
+        eprintln!("[amni-control] v1.5.7 ready display {}x{}", c.sw, c.sh);
     }
     spawn_watchdog(Arc::clone(&ctl));
+    #[cfg(windows)]
+    capture::spawn();
     let listener = TcpListener::bind("127.0.0.1:7878").await?;
     loop {
         let (stream, _) = listener.accept().await?;
@@ -261,6 +350,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let (r, mut w) = stream.into_split();
             let mut lines = BufReader::new(r).lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                if let Some(reply) = capture_command(&line) {
+                    if w.write_all(reply.as_bytes()).await.is_err() {
+                        break;
+                    }
+                    continue;
+                }
                 let Ok(ev) = serde_json::from_str::<InputEvent>(&line) else { continue };
                 let reply = {
                     let mut c = lock_ctl(&ctl);
@@ -273,5 +368,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         });
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn maps_laptop_keys() {
+        assert!(matches!(key_from_str("Space"), Some(Key::Unicode(' '))));
+        assert!(matches!(key_from_str(" "), Some(Key::Unicode(' '))));
+        assert!(matches!(key_from_str("a"), Some(Key::Unicode('a'))));
+        assert!(matches!(key_from_str("KeyA"), Some(Key::Unicode('a'))));
+        assert!(matches!(key_from_str("Digit7"), Some(Key::Unicode('7'))));
+        assert!(matches!(key_from_str("Enter"), Some(Key::Return)));
+        assert!(matches!(key_from_str("F12"), Some(Key::F12)));
+        assert!(key_from_str("Unidentified").is_none());
+    }
+    #[test]
+    fn shifted_chars_resolve_to_their_physical_key() {
+        assert!(matches!(key_from_str("A"), Some(Key::Unicode('a'))));
+        assert!(matches!(key_from_str("Z"), Some(Key::Unicode('z'))));
+        assert!(matches!(key_from_str("!"), Some(Key::Unicode('1'))));
+        assert!(matches!(key_from_str("?"), Some(Key::Unicode('/'))));
+        assert!(matches!(key_from_str(":"), Some(Key::Unicode(';'))));
+        assert!(matches!(key_from_str("~"), Some(Key::Unicode('`'))));
+        assert!(matches!(key_from_str("1"), Some(Key::Unicode('1'))));
+        assert!(matches!(key_from_str("/"), Some(Key::Unicode('/'))));
+    }
+    #[test]
+    fn only_shifted_chars_ask_for_shift() {
+        assert!(wants_shift("A"));
+        assert!(wants_shift("!"));
+        assert!(wants_shift("?"));
+        assert!(!wants_shift("a"));
+        assert!(!wants_shift("1"));
+        assert!(!wants_shift("Shift"));
+        assert!(!wants_shift("KeyA"));
+        assert!(!wants_shift("Enter"));
     }
 }

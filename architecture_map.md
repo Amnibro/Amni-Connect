@@ -1,5 +1,82 @@
 # Amni-Connect Architecture Map
 
+## 2026-09-01 v1.5.9 input must not share a clogged pipe with 16 Mbps video
+- Three data channels: `input` (ordered, priority high), `clipboard` (ordered), `screen` (unordered, maxRetransmits 0, priority low). Viewer `sendInput` / `sendPaste` prefer `input`. Host applies `{type:'paste',text}` as writeClipboard + Ctrl+V chord.
+- Renderer→main input is `ipcRenderer.send`, not invoke. HW video IPC drops non-keyframes while `hwPending`.
+- Packaged rust binary is `process.resourcesPath/amni-control.exe` (copied from `build/amni-control.exe` at pack time). NSIS `scripts/installer.nsh` creates `AmniControlElevated` at install time. `rustBinPath()` prefers the packed exe, then `rust/target/release`.
+- Default binary distribution is GitHub Releases (`publish.provider=github`, `npm run release`). Packaged hosts call `electron-updater` against that feed. `.github/workflows/release.yml` can rebuild and upload the same assets.
+- Auto-host must not call `hideToTray`. Tray only after an explicit Start Hosting click, and only if the toggle is on.
+
+## 2026-08-30 v1.5.8 lock scale + tray host
+- Chromium can still drop `scaleResolutionDownBy` after the first `setParameters`. `lockEncodeParams` is the single write path; the 500ms stats loop re-applies if `outbound-rtp.frameWidth` is below `track.getSettings().width` or `qualityLimitationReason === 'resolution'`.
+- Host window GPU: no `backdrop-filter` on header/panel. While hosting, default path is hide-to-tray (`trayHost` in `main.js`). `window-all-closed` must not teardown rust when `trayHost && !quitting`. Close while hosting is hide, not quit. Hidden renderer must not throttle (`backgroundThrottling: false`).
+- Toggle `amni-tray-host` in localStorage (`0` = stay on screen).
+
+## 2026-08-29 v1.5.7 stream quality + DXGI hardware encode
+- Blur was never the Electron shell. Default 1080p @ 4 Mbps on a 2752×1152 desktop downscaled then bilinear-upscaled. Defaults are now source / 60 fps / 12 Mbps; LAN AIMD floor 16 Mbps.
+- Chromium fallback still uses `desktopCapturer`. New Windows path: DXGI Desktop Duplication in `amni-control` → NV12 → Media Foundation H.264 (hardware MFT preferred) → length-prefixed ANC1 frames on `:7879` → Electron IPC → WebRTC `screen` data channel (unordered, no retransmit) → viewer WebCodecs + canvas.
+- Control plane stays `:7878` JSON. Capture commands: `capture-start` / `capture-update` / `capture-stop` / `capture-idr` / `capture-status`. Capture failure must not exit the input daemon.
+- Viewer `#zoom-container` has no transform transition. `updateCrisp()` sets `pixelated` only when `currentZoom > 1.02`. `sourceSize()` reads the canvas when the HW surface is active so zoom/input mapping follows the encoded frame, not a dead `<video>`.
+- Codec preference and `contentHint=detail` / `maintain-resolution` apply to the Chromium path only. The HW path's sharpness is bitrate + native resolution + pixelated zoom.
+
+## 2026-08-23 v1.5.6 signaling HTTP timeouts
+- 3389 is the frozen forwarded signaling port. Internet RDP probes complete TCP and then stall Node's HTTP parser. `server.headersTimeout=4000` / `requestTimeout=8000` / `keepAliveTimeout=4000` / `timeout=10000` so those sockets die and `socket.io` from the Electron host (`http://localhost:3389`) can connect. Chip `sig down` is `!socket.connected`.
+
+## 2026-08-17 v1.5.5 the key wire carries CHARACTERS, the OS wants PHYSICAL KEYS
+
+- **`key_from_str` is a character→physical-key resolver, not a lookup table.** The viewer sends
+  `e.key`, which for Shift+A is the string `"A"`. enigo 0.2.1 resolves a char with `VkKeyScanW`
+  (virtual key in the low byte, **required shift state in the high byte**) and then passes the whole
+  value to `MapVirtualKeyW`, which accepts a virtual key only — so every char that needs Shift maps
+  to 0, returns `InputError::Mapping`, and never reaches `SendInput`. `shift_base()` folds the
+  capitals and the 21 shifted symbols down to the key they physically live on before enigo sees them.
+- **Shift is state the daemon owns.** `Ctl.shift_held` tracks the client's Shift; `auto_shift` is
+  the daemon's own. A client may send the shifted character with Shift (viewer, physical keyboard)
+  or without it (any other client) and both must type the same thing.
+- **`errs` cannot detect a mapping failure.** It counts `SendInput` results, and this class of bug
+  fails before the call. A UIPI discard also reports success. To prove input works, read the target
+  back — cursor position for the mouse, the received text for the keyboard.
+- Do NOT test keyboard input by calling `SetForegroundWindow`: a script cannot steal foreground, and
+  the daemon's own console window holds it when started by `schtasks`. Minimise that console and let
+  the **daemon click into the target**; calibrate with two injected clicks and read `e.screenX` vs
+  `e.clientX` (offset only, scale 1 at this display).
+- Rebuilding `amni-control.exe` needs a kill-and-retry loop: Electron's `trySpawnRust` respawns the
+  daemon within seconds and re-locks the file. After rebuilding, restart through
+  `schtasks /run /tn AmniControlElevated` or the daemon comes back at **Medium** integrity and every
+  keystroke is silently discarded whenever an elevated window has focus.
+
+
+## 2026-08-17 v1.5.4 input daemon runs elevated (UIPI)
+
+- **Input integrity level is part of the architecture, not a deployment detail.** `amni-control.exe`
+  must run at **High** integrity. As a Medium IL child of non-elevated Electron it is silently
+  muted by UIPI whenever any elevated window holds foreground: `SendInput` is discarded and
+  `SetCursorPos` returns FALSE with `ERROR_INVALID_HANDLE` (6). Anthony runs elevated terminals
+  and Braid, so remote control died the moment one of them took focus.
+- **The v1.5.2 "daemon wedges while alive" entry below is superseded.** There was no wedge. Every
+  observation it records — alive, listening, ESTABLISHED, parsing, cursor frozen, "healed" by a
+  kill, "re-wedged" minutes later — is UIPI toggling with the foreground window. Do not add more
+  wedge instrumentation; check the foreground window's integrity level first.
+- Launch path: `trySpawnRust` -> `schtasks /run /tn AmniControlElevated` (Interactive, RunLevel
+  Highest, IgnoreNew, no time limit). Fallback to direct spawn only if the task is missing, and it
+  says so in `hostStatus`. A `requireAdministrator` manifest is **wrong here** — its UAC prompt is
+  on the secure desktop, unclickable by the remote user this feature exists for.
+- Teardown must use `schtasks /end` before `taskkill /IM`: Medium IL Electron cannot kill its own
+  High IL daemon, and a survivor holds `127.0.0.1:7878` through every restart.
+- Diagnostic order for "input does nothing" — cheapest discriminator first:
+  1. foreground window integrity level (elevated? then this is UIPI)
+  2. `OpenInputDesktop` name (`Default` vs `Winlogon` = lock screen / UAC)
+  3. daemon `ping` -> `errs`/`misses`/`direct`
+  4. direct TCP probe to `:7878` with a cursor read-back, bypassing viewer and relay entirely
+- Full-chain probe that proves it end to end: socket.io client -> `join-room ANTMAN-PC` ->
+  `input-event {type:'mouse-move',x,y}` -> read `GetCursorPos`. Expect `x*2752, y*1152`.
+
+## 2026-08-16 v1.5.3 LAN ICE classify + laptop key map
+- WebRTC only had Google STUN. Stats never read `local-candidate`/`remote-candidate` types. A same-LAN pair that nominated `srflx` looked like "just the internet" and AIMD capped to STUN's WAN estimate.
+- Electron: `WebRtcHideLocalIpsWithMdns` off so host candidates are real RFC1918, not `*.local`.
+- `classifyIcePath`: host-host **or** both RFC1918 = LAN. Chips: `rtc connected lan host-host`. LAN AIMD floor 8 Mbps, do not min() against `availableOutgoingBitrate`.
+- Keys: viewer/Join send `code`; rust `key_from_str` accepts Space, F1-F12, CapsLock, Insert, `KeyX`/`DigitN`. Unmapped keys log. Rebuild `amni-control.exe` when the running process releases the file lock.
+
 ## 2026-08-16 v1.5.2 zoom input gate + daemon wedge instrumentation
 - **Pinch to zoom killed all pointer control.** `viewer.html` `touchmove` routed the normal
   single-finger branch to a *local pan* whenever `currentZoom > 1.05`, so once you pinched, a
@@ -52,12 +129,12 @@
 E2EE remote-desktop: Electron host app + Rust input daemon + WebRTC to a phone/browser viewer.
 
 ## Processes
-- **main.js** (Electron main) — creates the host window, spawns/monitors `amni-control.exe`, owns the persistent TCP client to it, exposes IPC (`send-input-event`, `get-sources`, clipboard, local IP). **Single-instance lock** (`requestSingleInstanceLock`); Chromium `userData` + disk/GPU cache under `%AppData%/amni-connect` so multi-start does not fight cache locks.
+- **main.js** (Electron main) — creates the host window, spawns/monitors `amni-control.exe`, owns the persistent TCP client to it (`:7878` control, `:7879` HW video), exposes IPC (`send-input-event`, `get-sources`, clipboard, local IP, `start-hw-capture`). **Single-instance lock** (`requestSingleInstanceLock`); Chromium `userData` + disk/GPU cache under `%AppData%/amni-connect` so multi-start does not fight cache locks.
 
 - **server.js** (signaling) — Express + socket.io on `:3389` (`0.0.0.0`). Room create/join, WebRTC offer/answer/ICE relay, `input-event` relay (viewer → host), `POST /upload` (phone → PC file transfer, saved to `received-files/`), `GET /qr` pair PNG, serves `viewer.html`. Can run standalone (`npm run server`) or in-process inside Electron — `server.listen` gracefully no-ops on `EADDRINUSE` so only one instance ever actually binds.
-- **rust/src/main.rs** (`amni-control.exe`) — Tokio TCP listener on `127.0.0.1:7878`. Parses newline-delimited JSON input events and drives the OS cursor/keyboard via `enigo` (Windows: `SendInput`/`SetCursorPos` under the hood).
-- **index.html** (host UI, renderer) — hosts the screen-share (`desktopCapturer` + WebRTC), receives `input-event` over its own socket.io connection to `server.js` and forwards to Rust via `window.electronAPI.sendInputEvent` → IPC → `main.js`.
-- **viewer.html** (phone/browser UI) — joins a room, renders the incoming video track, captures touch/mouse/keyboard and emits `input-event` to `server.js`; file picker uploads via `POST /upload`.
+- **rust/src/main.rs** (`amni-control.exe`) — Tokio TCP listener on `127.0.0.1:7878` for input + capture commands. Windows also DXGI-captures and MF-encodes H.264 onto `127.0.0.1:7879`. Input still via `enigo` (`SendInput`/`SetCursorPos`).
+- **index.html** (host UI, renderer) — hosts the screen-share (DXGI/HW path when hello arrives, else `desktopCapturer` + WebRTC), receives `input-event` and forwards to Rust via `window.electronAPI.sendInputEvent` → IPC → `main.js`.
+- **viewer.html** (phone/browser UI) — joins a room, renders the incoming video track or WebCodecs canvas, captures touch/mouse/keyboard and emits `input-event` to `server.js`; file picker uploads via `POST /upload`.
 
 ## Input event path
 

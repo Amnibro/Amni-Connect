@@ -67,7 +67,20 @@ server.on('error', (err) => {
   console.error('Amni-Connect signaling server error:', err);
 });
 
+function sockIp(socket) {
+  let a = socket.handshake?.address || socket.conn?.remoteAddress || '';
+  if (a.startsWith('::ffff:')) a = a.slice(7);
+  return a;
+}
+function lanIp(ip) {
+  if (!ip) return '';
+  if (ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('169.254.')) return ip;
+  const m = String(ip).match(/^172\.(\d+)\./);
+  return m && +m[1] >= 16 && +m[1] <= 31 ? ip : '';
+}
 io.on('connection', (socket) => {
+  const mine = lanIp(sockIp(socket));
+  if (mine) socket.emit('your-lan', mine);
   socket.on('create-room', (customId) => {
     let roomId = (customId && typeof customId === 'string' && customId.trim().length >= 4) 
       ? customId.trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') 
@@ -100,6 +113,10 @@ io.on('connection', (socket) => {
     room.viewers.add(socket);
     socket.emit('room-joined', id);
     room.host.emit('viewer-joined', socket.id);
+    const vLan = lanIp(sockIp(socket));
+    const hLan = lanIp(sockIp(room.host));
+    if (hLan) socket.emit('peer-lan', hLan);
+    if (vLan) room.host.emit('peer-lan', vLan);
   });
 
   socket.on('offer', (data) => socket.to(data.roomId).emit('offer', data));
@@ -129,5 +146,9 @@ io.on('connection', (socket) => {
   });
 });
 
+server.headersTimeout = 4000;
+server.requestTimeout = 8000;
+server.keepAliveTimeout = 4000;
+server.timeout = 10000;
 server.listen(PORT, '0.0.0.0', () => console.log(`Amni-Connect signaling server on port ${PORT}\nMobile viewer: http://<your-ip>:${PORT}/viewer`));
 module.exports = server;

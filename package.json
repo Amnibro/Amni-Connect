@@ -1,17 +1,20 @@
 {
   "name": "amni-connect",
-  "version": "1.5.2",
+  "version": "1.5.9",
   "description": "End-to-end encrypted Rust + Electron remote desktop",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder",
+    "icon": "node scripts/make-icon.js",
+    "build": "node scripts/make-icon.js && electron-builder",
+    "dist": "node scripts/make-icon.js && electron-builder --win nsis",
+    "release": "node scripts/make-icon.js && electron-builder --win nsis --publish always",
     "dev": "nodemon server.js",
     "server": "node server.js"
   },
   "dependencies": {
     "dotenv": "^16.6.1",
-    "electron": "^33.2.0",
+    "electron-updater": "^6.8.9",
     "express": "^4.21.2",
     "qrcode": "^1.5.4",
     "socket.io": "^4.8.1",
@@ -19,6 +22,7 @@
     "uuid": "^10.0.0"
   },
   "devDependencies": {
+    "electron": "^33.2.0",
     "electron-builder": "^25.1.8",
     "nodemon": "^3.1.7"
   },
@@ -28,14 +32,41 @@
     "directories": {
       "buildResources": "assets"
     },
+    "files": [
+      "**/*",
+      "!rust/target/**",
+      "!backups/**",
+      "!docs/**",
+      "!dist/**",
+      "!build/*.exe"
+    ],
+    "extraResources": [
+      {
+        "from": "build/amni-control.exe",
+        "to": "amni-control.exe"
+      }
+    ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": true,
+      "shortcutName": "Amni-Connect",
+      "runAfterFinish": true,
+      "include": "scripts/installer.nsh",
+      "artifactName": "Amni-Connect-Setup-${version}.${ext}",
+      "uninstallDisplayName": "Amni-Connect"
     },
     "mac": {
       "target": "dmg"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "category": "Network",
       "maintainer": "Amnibro <amnibro7@gmail.com>",
       "desktop": {
@@ -43,7 +74,15 @@
         "Comment": "End-to-end encrypted remote desktop",
         "Categories": "Network;RemoteAccess;"
       }
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Amnibro",
+        "repo": "Amni-Connect",
+        "releaseType": "release"
+      }
+    ]
   },
   "keywords": [
     "remote-desktop",
@@ -56,7 +95,7 @@
   "homepage": "https://amni-scient.com/amni-connect",
   "repository": {
     "type": "git",
-    "url": "https://github.com/amnibro/Amni-Connect.git"
+    "url": "https://github.com/Amnibro/Amni-Connect.git"
   },
   "license": "SEE LICENSE IN LICENSE"
 }

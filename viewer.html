@@ -31,11 +31,12 @@ button.danger{background:#ef4444}
 #signal-pill.on{display:inline-flex}
 #signal-dot{width:7px;height:7px;border-radius:50%;background:#64748b}
 #viewer-screen{flex:1;display:none;position:relative;background:#000;overflow:hidden}
-#zoom-container{width:100%;height:100%;position:relative;transform-origin:0 0;transition:transform 0.2s}
-video{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none}
+#zoom-container{width:100%;height:100%;position:relative;transform-origin:0 0}
+video,#remote-canvas{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none}
+#remote-canvas{display:none}
 #touch-overlay{position:absolute;inset:0;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none}
-#toolbar{position:fixed;left:0;right:0;bottom:0;display:flex;gap:4px;padding:8px;background:rgba(0,0,0,.72);backdrop-filter:blur(8px);z-index:60;padding-left:max(8px,env(safe-area-inset-left));padding-right:max(8px,env(safe-area-inset-right));padding-bottom:max(8px,env(safe-area-inset-bottom))}
-#toolbar button{width:auto;min-width:0;flex:1;padding:8px 4px;font-size:12px;border-radius:6px;margin:0;white-space:nowrap}
+#toolbar{position:fixed;left:0;right:0;bottom:0;display:flex;flex-wrap:wrap;gap:4px;padding:8px;background:rgba(0,0,0,.72);backdrop-filter:blur(8px);z-index:60;padding-left:max(8px,env(safe-area-inset-left));padding-right:max(8px,env(safe-area-inset-right));padding-bottom:max(8px,env(safe-area-inset-bottom))}
+#toolbar button{width:auto;min-width:0;flex:1 1 18%;padding:8px 4px;font-size:11px;border-radius:6px;margin:0;white-space:nowrap}
 #mode-btn{background:#475569}
 #zoom-btn{background:#3b82f6}
 #kb-btn{background:#334155}
@@ -91,6 +92,7 @@ video{width:100%;height:100%;object-fit:contain;display:block;pointer-events:non
 <div id="viewer-screen">
   <div id="zoom-container">
     <video id="remote-video" autoplay playsinline muted></video>
+    <canvas id="remote-canvas"></canvas>
     <div id="touch-overlay"></div>
   </div>
   <div id="keyboard-bar">
@@ -118,7 +120,7 @@ video{width:100%;height:100%;object-fit:contain;display:block;pointer-events:non
         <span onclick="toggleClipboard()" style="cursor:pointer;color:#94a3b8">&times; Close</span>
       </div>
       <textarea id="clip-input" rows="4" placeholder="Host clipboard will appear here. Type/paste to send back." style="width:100%;background:#1e2937;border:2px solid #475569;border-radius:8px;color:white;font-size:14px;padding:12px;outline:none;resize:none;"></textarea>
-      <button onclick="sendClipboard()" style="padding:10px;background:#22c55e">Send to Host</button>
+      <button onclick="sendClipboard(true)" style="padding:10px;background:#22c55e">Paste to PC</button>
     </div>
   </div>
   <div id="file-progress" style="position:fixed;bottom:52px;left:0;right:0;display:none;padding:10px 14px;background:rgba(0,0,0,.85);z-index:56;padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env(safe-area-inset-right))">
@@ -130,6 +132,8 @@ video{width:100%;height:100%;object-fit:contain;display:block;pointer-events:non
     <button id="mode-btn" onclick="toggleMode()">&#128433; Touch</button>
     <button id="zoom-out" onclick="zoom(1/1.25)" style="background:#3b82f6;flex:0.5">&#128269;-</button>
     <button id="zoom-in" onclick="zoom(1.25)" style="background:#3b82f6;flex:0.5">&#128269;+</button>
+    <button id="paste-btn" onclick="pasteToPc()" style="background:#22c55e">Paste</button>
+    <button id="mic-btn" onclick="toggleVoice()" style="background:#7c3aed">Mic</button>
     <button id="clip-btn" onclick="toggleClipboard()" style="background:#f59e0b">📋 Clip</button>
     <button id="file-btn" onclick="document.getElementById('file-input').click()" style="background:#14b8a6">&#128190; Send</button>
     <button id="kb-btn" onclick="toggleKeyboard()">&#9000; KB</button>
@@ -149,6 +153,128 @@ if (document.getElementById('host-input').value && document.getElementById('code
 }
 
 const ICE = [{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}];
+let lastIce = { lan: false, label: '' };
+function rfc1918(ip) {
+  if (!ip) return false;
+  if (ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('169.254.')) return true;
+  const m = String(ip).match(/^172\.(\d+)\./);
+  return !!(m && +m[1] >= 16 && +m[1] <= 31);
+}
+let ourLan = '', peerLan = '';
+function rewriteLocal(cand, ip) {
+  if (!cand || !ip) return null;
+  const init = typeof cand === 'string' ? { candidate: cand } : (cand.candidate !== undefined ? { ...cand } : cand.toJSON ? cand.toJSON() : cand);
+  if (!init.candidate || !/\.local/i.test(init.candidate)) return null;
+  return { ...init, candidate: init.candidate.replace(/[A-Za-z0-9\-]+\.local/i, ip) };
+}
+function mungeSdp(desc, ip) {
+  if (!desc || !ip || !desc.sdp || !/\.local/i.test(desc.sdp)) return desc;
+  return { type: desc.type, sdp: desc.sdp.replace(/[A-Za-z0-9\-]+\.local/gi, ip) };
+}
+async function setLocalMunged(desc) {
+  const d = mungeSdp({ type: desc.type, sdp: desc.sdp }, ourLan);
+  await pc.setLocalDescription(d);
+  return d;
+}
+async function setRemoteMunged(desc) {
+  await pc.setRemoteDescription(new RTCSessionDescription(mungeSdp({ type: desc.type, sdp: desc.sdp }, peerLan)));
+}
+function emitIce(candidate) {
+  if (!candidate || !socket || !roomId) return;
+  const init = candidate.toJSON ? candidate.toJSON() : candidate;
+  socket.emit('ice-candidate', { roomId, candidate: init });
+  const extra = rewriteLocal(init, ourLan);
+  if (extra) socket.emit('ice-candidate', { roomId, candidate: extra });
+}
+function addIce(candidate) {
+  if (!pc || !candidate) return;
+  pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+  const extra = rewriteLocal(candidate, peerLan);
+  if (extra) pc.addIceCandidate(new RTCIceCandidate(extra)).catch(() => {});
+}
+function classifyIcePath(pair, byId) {
+  if (!pair) return { lan: false, label: '' };
+  const loc = byId[pair.localCandidateId] || {}, rem = byId[pair.remoteCandidateId] || {};
+  const lt = loc.candidateType || loc.type || '?', rt = rem.candidateType || rem.type || '?';
+  const la = loc.address || loc.ip || '', ra = rem.address || rem.ip || '';
+  const lan = (lt === 'host' && rt === 'host') || (rfc1918(la) && rfc1918(ra));
+  return { lan, label: (lan ? 'lan' : 'wan') + ' ' + lt + '-' + rt };
+}
+function rankVideoCodec(c) {
+  const m = (c.mimeType || '').toLowerCase();
+  if (m === 'video/h264') return 0;
+  if (m === 'video/vp9') return 1;
+  if (m === 'video/av1') return 2;
+  if (m === 'video/vp8') return 9;
+  return 5;
+}
+function preferDesktopCodecs(peer) {
+  const caps = RTCRtpSender.getCapabilities && RTCRtpSender.getCapabilities('video');
+  if (!caps || !peer) return;
+  const ordered = caps.codecs.slice().sort((a, b) => rankVideoCodec(a) - rankVideoCodec(b));
+  peer.getTransceivers().forEach(t => { try { t.setCodecPreferences(ordered); } catch (e) {} });
+}
+let hwDec = null, hwParts = new Map(), hwCanvas = null, hwUsing = false;
+function useHwSurface(on) {
+  hwUsing = on;
+  const v = document.getElementById('remote-video');
+  const c = document.getElementById('remote-canvas');
+  if (c) c.style.display = on ? 'block' : 'none';
+  if (v) v.style.display = on ? 'none' : 'block';
+}
+function ensureHwDec(w, h, codec) {
+  if (hwDec && hwDec.state !== 'closed') return hwDec;
+  if (typeof VideoDecoder === 'undefined') return null;
+  hwCanvas = document.getElementById('remote-canvas');
+  const ctx = hwCanvas.getContext('2d', { alpha: false, desynchronized: true });
+  hwCanvas.width = w || hwCanvas.width || 1920;
+  hwCanvas.height = h || hwCanvas.height || 1080;
+  hwDec = new VideoDecoder({
+    output: (frame) => {
+      if (hwCanvas.width !== frame.displayWidth || hwCanvas.height !== frame.displayHeight) {
+        hwCanvas.width = frame.displayWidth;
+        hwCanvas.height = frame.displayHeight;
+      }
+      ctx.drawImage(frame, 0, 0);
+      frame.close();
+    },
+    error: () => { hwDec = null; }
+  });
+  try {
+    hwDec.configure({ codec: codec || 'avc1.640028', codedWidth: hwCanvas.width, codedHeight: hwCanvas.height, optimizeForLatency: true, hardwareAcceleration: 'prefer-hardware' });
+  } catch (e) { hwDec = null; return null; }
+  useHwSurface(true);
+  return hwDec;
+}
+function assembleScreen(buf) {
+  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  if (u8.byteLength < 6) return null;
+  const kind = u8[0], flags = u8[1], seq = new DataView(u8.buffer, u8.byteOffset, u8.byteLength).getUint32(2, true);
+  if (kind === 1) return { au: u8.subarray(6), key: !!(flags & 1) };
+  if (kind !== 2 || u8.byteLength < 10) return null;
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  const idx = dv.getUint16(6, true), total = dv.getUint16(8, true);
+  let rec = hwParts.get(seq);
+  if (!rec) { rec = { flags, total, got: [] }; hwParts.set(seq, rec); }
+  rec.got[idx] = u8.subarray(10);
+  if (rec.got.filter(Boolean).length < total) return null;
+  let n = 0; rec.got.forEach(p => n += p.byteLength);
+  const au = new Uint8Array(n); let o = 0;
+  rec.got.forEach(p => { au.set(p, o); o += p.byteLength; });
+  hwParts.delete(seq);
+  if (hwParts.size > 8) hwParts.clear();
+  return { au, key: !!(rec.flags & 1) };
+}
+function onScreenPacket(data) {
+  const assembled = assembleScreen(data instanceof ArrayBuffer ? new Uint8Array(data) : data);
+  if (!assembled) return;
+  const dec = ensureHwDec(0, 0, 'avc1.640028');
+  if (!dec || dec.state === 'closed') return;
+  try {
+    dec.decode(new EncodedVideoChunk({ type: assembled.key ? 'key' : 'delta', timestamp: performance.now() * 1000, data: assembled.au }));
+  } catch (e) {}
+  setStatus('Streaming \u25cf Live');
+}
 let socket, pc, roomId;
 const statusEl = document.getElementById('status-text');
 const setStatus = (t) => statusEl.textContent = t;
@@ -171,6 +297,8 @@ function startViewerStats() {
     if (!pc) return;
     const s = await pc.getStats();
     let rtt = 0, loss = 0, haveRtt = false, haveLoss = false;
+    const iceById = {};
+    let icePair = null;
     s.forEach(r => {
       if (r.type === 'inbound-rtp' && r.kind === 'video') {
         const rcvd = r.packetsReceived || 0, lost = r.packetsLost || 0;
@@ -178,10 +306,13 @@ function startViewerStats() {
         priorRcvd = rcvd; priorLost = lost;
         if (dRcvd + dLost > 0) { loss = Math.max(0, dLost / (dRcvd + dLost)); haveLoss = true; }
       }
+      if (r.type === 'local-candidate' || r.type === 'remote-candidate') iceById[r.id] = r;
       if (r.type === 'candidate-pair' && (r.state === 'succeeded' || r.nominated)) {
+        icePair = r;
         if (r.currentRoundTripTime != null) { rtt = r.currentRoundTripTime; haveRtt = true; }
       }
     });
+    lastIce = classifyIcePath(icePair, iceById);
     const sig = classifySignal(loss, rtt);
     sigDot.style.background = sig.color;
     const rttMs = haveRtt ? Math.round(rtt * 1000) + 'ms' : '';
@@ -202,6 +333,7 @@ function connect() {
   localStorage.setItem('amni-last-code', code);
   const port = location.port || 3389;
   const proto = location.protocol === 'https:' ? 'https' : 'http';
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) peerLan = host;
   socket = io(`${proto}://${host}:${port}`, { transports: ['websocket','polling'] });
   socket.on('connect', () => { setStatus('Connected to signaling server'); socket.emit('join-room', code); paintLinkChips(); });
   socket.on('connect_error', () => setStatus('Cannot reach host — check IP and ensure server is running'));
@@ -217,14 +349,16 @@ function connect() {
   socket.on('error', (msg) => setStatus(`Error: ${msg}`));
   socket.on('offer', async ({ offer }) => {
     if (!pc) createPC();
-    await pc.setRemoteDescription(new RTCSessionDescription(offer));
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
+    await setRemoteMunged(offer);
+    preferDesktopCodecs(pc);
+    const answer = await setLocalMunged(await pc.createAnswer());
     socket.emit('answer', { roomId, answer });
     setStatus('WebRTC negotiating\u2026');
   });
-  socket.on('answer', async ({ answer }) => pc?.setRemoteDescription(new RTCSessionDescription(answer)));
-  socket.on('ice-candidate', ({ candidate }) => pc?.addIceCandidate(new RTCIceCandidate(candidate)).catch(()=>{}));
+  socket.on('answer', async ({ answer }) => { if (pc) await setRemoteMunged(answer); });
+  socket.on('your-lan', (ip) => { ourLan = ip || ourLan; });
+  socket.on('peer-lan', (ip) => { peerLan = ip || peerLan; });
+  socket.on('ice-candidate', ({ candidate }) => addIce(candidate));
   socket.on('input-dropped', (d) => {
     const now = Date.now();
     if (now - inputWarnedAt > 4000) { inputWarnedAt = now; showToast(d.reason === 'no-room' ? 'Host room gone - reconnecting' : 'Host offline - input not applied'); }
@@ -246,7 +380,7 @@ function paintLinkChips() {
   const inn = document.getElementById('chip-in');
   if (sig) { const up = !!(socket && socket.connected); sig.textContent = up ? 'sig up' : 'sig down'; sig.className = up ? 'ok' : 'bad'; }
   const st = pc ? pc.connectionState : 'idle';
-  if (rtc) { rtc.textContent = 'rtc ' + st; rtc.className = st === 'connected' ? 'ok' : (st === 'connecting' || st === 'new' ? 'warn' : 'bad'); }
+  if (rtc) { rtc.textContent = 'rtc ' + st + (lastIce.label ? ' ' + lastIce.label : ''); rtc.className = st === 'connected' ? (lastIce.lan ? 'ok' : 'warn') : (st === 'connecting' || st === 'new' ? 'warn' : 'bad'); }
   if (inn) { inn.textContent = 'input ' + (inputPath || 'none'); inn.className = inputPath === 'p2p' ? 'ok' : (inputPath === 'relay' ? 'warn' : 'bad'); }
 }
 
@@ -257,13 +391,12 @@ async function recoverPc() {
     if (pc && iceTries < 3 && (pc.connectionState === 'failed' || pc.connectionState === 'disconnected')) {
       iceTries++;
       setStatus('ICE restart ' + iceTries);
-      const offer = await pc.createOffer({ iceRestart: true });
-      await pc.setLocalDescription(offer);
+      const offer = await setLocalMunged(await pc.createOffer({ iceRestart: true }));
       if (socket && roomId) socket.emit('offer', { roomId, offer });
       return;
     }
     try { pc && pc.close(); } catch (e) {}
-    pc = null; dataChannel = null; iceTries = 0;
+    pc = null; dataChannel = null; inputChannel = null; iceTries = 0;
     createPC();
     setStatus('Rebuilding peer…');
   } catch (e) {
@@ -273,8 +406,8 @@ async function recoverPc() {
 }
 
 function createPC() {
-  pc = new RTCPeerConnection({ iceServers: ICE });
-  pc.onicecandidate = ({ candidate }) => candidate && socket.emit('ice-candidate', { roomId, candidate });
+  pc = new RTCPeerConnection({ iceServers: ICE, iceCandidatePoolSize: 4 });
+  pc.onicecandidate = ({ candidate }) => emitIce(candidate);
   pc.onconnectionstatechange = () => {
     setStatus(`WebRTC: ${pc.connectionState}`);
     paintLinkChips();
@@ -290,6 +423,12 @@ function createPC() {
     startViewerStats();
   };
   pc.ondatachannel = (e) => {
+    if (e.channel.label === 'screen') {
+      e.channel.binaryType = 'arraybuffer';
+      e.channel.onmessage = (ev) => { if (typeof ev.data !== 'string') onScreenPacket(ev.data); };
+      return;
+    }
+    if (e.channel.label === 'input') { inputChannel = e.channel; inputChannel.onopen = () => paintLinkChips(); return; }
     dataChannel = e.channel;
     dataChannel.onopen = () => setStatus('WebRTC: connected (Data+Video)');
     dataChannel.onmessage = (ev) => {
@@ -320,11 +459,19 @@ function createPC() {
   };
 }
 
-let inputPath = 'none', inputWarnedAt = 0;
-function sendInput(event) {
-  if (dataChannel?.readyState === 'open') {
-    try { dataChannel.send(JSON.stringify({ type: 'input', ev: event })); inputPath = 'p2p'; paintLinkChips(); return; } catch (e) {}
+let inputPath = 'none', inputWarnedAt = 0, inputChannel = null;
+function sendWire(obj) {
+  if (inputChannel?.readyState === 'open') {
+    try { inputChannel.send(JSON.stringify(obj)); return 'p2p'; } catch (e) {}
   }
+  if (dataChannel?.readyState === 'open') {
+    try { dataChannel.send(JSON.stringify(obj)); return 'p2p'; } catch (e) {}
+  }
+  return null;
+}
+function sendInput(event) {
+  const via = sendWire({ type: 'input', ev: event });
+  if (via) { inputPath = via; paintLinkChips(); return; }
   if (socket?.connected) { socket.emit('input-event', { ...event, roomId }); inputPath = 'relay'; paintLinkChips(); return; }
   inputPath = 'none'; paintLinkChips();
   const now = Date.now();
@@ -391,9 +538,14 @@ function setDragMode(on) {
 const overlay = document.getElementById('touch-overlay');
 let panX = 0, panY = 0, currentZoom = 1;
 
-function getVideoRect() {
+function sourceSize() {
+  const c = document.getElementById('remote-canvas');
+  if (hwUsing && c && c.width) return { w: c.width, h: c.height };
   const v = document.getElementById('remote-video');
-  const vw = v.videoWidth, vh = v.videoHeight;
+  return { w: v.videoWidth, h: v.videoHeight };
+}
+function getVideoRect() {
+  const { w: vw, h: vh } = sourceSize();
   const r = overlay.getBoundingClientRect();
   if (!vw || !vh) return { left: r.left, top: r.top, width: r.width, height: r.height };
   const cAR = r.width / r.height, vAR = vw / vh;
@@ -416,17 +568,25 @@ function clampPan() {
   panY = Math.min(0, Math.max(vh - vh * currentZoom, panY));
 }
 
+function updateCrisp() {
+  const mode = currentZoom > 1.02 ? 'pixelated' : 'auto';
+  const v = document.getElementById('remote-video');
+  const c = document.getElementById('remote-canvas');
+  if (v) v.style.imageRendering = mode;
+  if (c) c.style.imageRendering = mode;
+}
 function applyTransform(instant) {
   const c = document.getElementById('zoom-container');
-  c.style.transition = instant ? 'none' : 'transform 0.15s';
+  c.style.transition = 'none';
   c.style.transform = `translate(${panX}px,${panY}px) scale(${currentZoom})`;
+  updateCrisp();
 }
 
 // ── Zoom — multiplicative, cap scales with source resolution ──────────────────
 const ZOOM_MIN = 0.5, ZOOM_HARD_MAX = 32, ZOOM_STEP = 1.25, ZOOM_PX_PER_SRC = 4;
 function maxZoom() {
-  const v = document.getElementById('remote-video'), base = getVideoRect().width / currentZoom;
-  return !v.videoWidth || !base ? 8 : Math.min(ZOOM_HARD_MAX, Math.max(4, v.videoWidth / base * ZOOM_PX_PER_SRC));
+  const src = sourceSize(), base = getVideoRect().width / currentZoom;
+  return !src.w || !base ? 8 : Math.min(ZOOM_HARD_MAX, Math.max(4, src.w / base * ZOOM_PX_PER_SRC));
 }
 function setZoom(next, clientX, clientY) {
   const prev = currentZoom, r = document.getElementById('viewer-screen').getBoundingClientRect();
@@ -720,19 +880,23 @@ const PHYS_MODS = ['Control', 'Shift', 'Alt', 'Meta'];
 const PASS_KEYS = ['F5', 'F11', 'F12'];
 const kbCaptureOn = () => document.getElementById('viewer-screen').style.display !== 'none' && !['INPUT', 'TEXTAREA'].includes((document.activeElement || {}).tagName);
 const physHeld = new Set();
+function keyFromDom(e) {
+  const k = e.key === ' ' ? 'Space' : e.key;
+  return { type: e.type === 'keyup' ? 'key-up' : 'key-down', key: k, code: e.code };
+}
 document.addEventListener('keydown', (e) => {
   if (!kbCaptureOn() || PASS_KEYS.includes(e.key)) return;
   e.preventDefault();
   if (e.repeat && PHYS_MODS.includes(e.key)) return;
   physHeld.add(e.key);
-  sendInput({ type: 'key-down', key: e.key });
+  sendInput(keyFromDom(e));
 });
 document.addEventListener('keyup', (e) => {
   if (PASS_KEYS.includes(e.key)) return;
   physHeld.delete(e.key);
   if (!kbCaptureOn()) return;
   e.preventDefault();
-  sendInput({ type: 'key-up', key: e.key });
+  sendInput(keyFromDom(e));
 });
 const releaseHeld = () => { physHeld.forEach(k => sendInput({ type: 'key-up', key: k })); physHeld.clear(); };
 window.addEventListener('blur', releaseHeld);
@@ -915,12 +1079,48 @@ function toggleClipboard() {
   bar.style.display = bar.style.display === 'block' ? 'none' : 'block';
 }
 
-function sendClipboard() {
-  if (dataChannel && dataChannel.readyState === 'open') {
-    const text = document.getElementById('clip-input').value;
-    dataChannel.send(JSON.stringify({ type: 'clipboard-sync', text }));
-    try { navigator.clipboard.writeText(text).catch(()=>{}); } catch(e){}
-  }
+function sendPaste(text) {
+  if (!text) return false;
+  const via = sendWire({ type: 'paste', text });
+  if (via) { showToast('Pasted to PC'); return true; }
+  showToast('Not connected');
+  return false;
+}
+async function pasteToPc() {
+  let text = '';
+  try { text = await navigator.clipboard.readText(); } catch (e) {}
+  if (text && sendPaste(text)) return;
+  document.getElementById('clipboard-bar').style.display = 'block';
+  const box = document.getElementById('clip-input');
+  box.focus();
+  box.select();
+  showToast('Paste here, then Paste to PC');
+}
+function sendClipboard(doPaste) {
+  const text = document.getElementById('clip-input').value;
+  if (!text) return showToast('Nothing to paste');
+  if (doPaste) { sendPaste(text); return; }
+  if (sendWire({ type: 'clipboard-sync', text })) showToast('Clipboard sent');
+  try { navigator.clipboard.writeText(text).catch(()=>{}); } catch(e){}
+}
+let voiceRec = null, voiceOn = false;
+function toggleVoice() {
+  const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const btn = document.getElementById('mic-btn');
+  if (!Rec) { showToast('Voice needs Chrome'); return; }
+  if (voiceOn && voiceRec) { try { voiceRec.stop(); } catch (e) {} return; }
+  voiceRec = new Rec();
+  voiceRec.lang = navigator.language || 'en-US';
+  voiceRec.interimResults = false;
+  voiceRec.continuous = false;
+  voiceRec.onresult = (e) => {
+    const t = Array.from(e.results).map(r => r[0].transcript).join(' ').trim();
+    if (t) sendPaste(t);
+  };
+  voiceRec.onerror = () => { voiceOn = false; if (btn) btn.textContent = 'Mic'; };
+  voiceRec.onend = () => { voiceOn = false; if (btn) btn.textContent = 'Mic'; };
+  try { voiceRec.start(); voiceOn = true; if (btn) btn.textContent = 'Listening'; showToast('Listening…'); }
+  catch (e) { showToast('Mic blocked'); }
 }
 
 function disconnect() {

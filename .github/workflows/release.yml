@@ -1,0 +1,42 @@
+name: release
+on:
+  workflow_dispatch:
+jobs:
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: cargo build --release --manifest-path rust/Cargo.toml
+      - shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build | Out-Null
+          Copy-Item rust/target/release/amni-control.exe build/amni-control.exe
+      - run: npm ci
+      - run: npm run dist
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $ver = (Get-Content package.json | ConvertFrom-Json).version
+          $tag = "v$ver"
+          $files = @(
+            (Get-Item dist/Amni-Connect-Setup-*.exe).FullName,
+            (Get-Item dist/latest.yml).FullName,
+            (Get-Item dist/*.blockmap).FullName
+          )
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag @files --clobber
+          } else {
+            gh release create $tag @files --title $tag --notes "Amni-Connect $tag — download Amni-Connect-Setup from this release."
+          }

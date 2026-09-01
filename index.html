@@ -10,13 +10,13 @@
         * { box-sizing: border-box; }
         body { margin: 0; font-family: system-ui, Segoe UI, sans-serif; background: var(--paper); color: var(--ink); height: 100vh; overflow: hidden; }
         .container { display: flex; flex-direction: column; height: 100vh; }
-        header { flex-shrink: 0; background: color-mix(in srgb,var(--surface) 92%,transparent); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); backdrop-filter: blur(12px); gap: 12px; }
+        header { flex-shrink: 0; background: var(--surface); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); gap: 12px; }
         .logo { font-size: 20px; font-weight: 700; color: var(--you); display: flex; align-items: center; gap: 10px; letter-spacing: -.02em; }
         .hdr-chips { display:inline-flex; gap:6px; flex-wrap:wrap; }
         .hdr-chips span { font:650 10px/1.1 ui-monospace,Consolas,monospace; padding:4px 8px; border-radius:999px; border:1px solid var(--line); color:var(--mut); }
         .status { padding: 6px 16px; border-radius: 9999px; font-size: 13px; font-weight: 500; background: #64748b; }
         .main { flex: 1; display: flex; padding: 20px; gap: 20px; overflow: hidden; min-height: 0; }
-        .panel { background: rgba(15,23,42,0.6); border-radius: 14px; padding: 20px; border: 1px solid #334155; backdrop-filter: blur(12px); width: 320px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+        .panel { background: var(--surface); border-radius: 14px; padding: 20px; border: 1px solid #334155; width: 320px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
         .panel-scroll { flex: 1; overflow-y: auto; min-height: 0; scrollbar-width: thin; scrollbar-color: #334155 transparent; }
         .panel-scroll::-webkit-scrollbar { width: 4px; }
         .panel-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
@@ -90,7 +90,7 @@
                     <div id="hostMode">
                         <input type="text" id="customRoomCode" placeholder="Optional: Persistent Room Code" style="text-transform:uppercase">
                         <select id="monitorSelect"></select>
-                        <button onclick="createAndHost()">&#128640; Start Hosting (Share Screen)</button>
+                        <button onclick="userClickedHost=true; createAndHost()">&#128640; Start Hosting (Share Screen)</button>
                     </div>
                     <div id="viewerMode" style="display:none;">
                         <input type="text" id="roomCodeInput" placeholder="Enter Room Code" maxlength="32" style="text-transform:uppercase">
@@ -109,9 +109,9 @@
                     <h2 class="section-head">&#9881;&#65039; Stream Settings <span id="liveSettingsPill" class="live-pill" style="display:none;">LIVE</span></h2>
                     <div class="setting-row">
                         <label>Resolution</label>
-                        <select id="resolutionSelect" onchange="applyStreamSettings()">
-                            <option value="source">Source (native)</option>
-                            <option value="1920x1080" selected>1080p — 1920×1080</option>
+                        <select id="resolutionSelect" onchange="onUserStreamChange()">
+                            <option value="source" selected>Source (native)</option>
+                            <option value="1920x1080">1080p — 1920×1080</option>
                             <option value="1280x720">720p — 1280×720</option>
                             <option value="2560x1440">1440p — 2560×1440</option>
                             <option value="3840x2160">4K — 3840×2160</option>
@@ -119,17 +119,17 @@
                     </div>
                     <div class="setting-row">
                         <label>Frame Rate</label>
-                        <select id="fpsSelect" onchange="applyStreamSettings()">
-                            <option value="60">60 fps</option>
-                            <option value="30" selected>30 fps</option>
+                        <select id="fpsSelect" onchange="onUserStreamChange()">
+                            <option value="60" selected>60 fps</option>
+                            <option value="30">30 fps</option>
                             <option value="24">24 fps</option>
                             <option value="15">15 fps</option>
                         </select>
                     </div>
                     <div class="setting-row">
                         <label>Bitrate</label>
-                        <input type="range" id="qualitySlider" min="500" max="20000" step="500" value="4000" oninput="onSliderInput()">
-                        <span class="quality-val" id="qualityLabel">4 Mbps</span>
+                        <input type="range" id="qualitySlider" min="500" max="20000" step="500" value="12000" oninput="onSliderInput()">
+                        <span class="quality-val" id="qualityLabel">12 Mbps</span>
                     </div>
                     <div id="autoHint" class="auto-hint">&#128640; Auto-adapting to network</div>
                     <div class="toggle-row">
@@ -147,6 +147,10 @@
                     <div class="toggle-row">
                         <label>View Only (this side)</label>
                         <label class="toggle"><input type="checkbox" id="viewOnlyToggle"><span class="slider"></span></label>
+                    </div>
+                    <div class="toggle-row">
+                        <label>Tray while hosting <span style="font-size:10px;color:#64748b;font-weight:400;">(hides chrome)</span></label>
+                        <label class="toggle"><input type="checkbox" id="trayToggle" onchange="onTrayToggle()"><span class="slider"></span></label>
                     </div>
 
                     <h2 class="section-head">&#128202; Connection Stats</h2>
@@ -176,6 +180,38 @@
     <script>
         const SIGNALING_URL = 'http://localhost:3389';
         const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
+        let ourLan = '', peerLan = '';
+        function rewriteLocal(cand, ip) {
+            if (!cand || !ip) return null;
+            const init = typeof cand === 'string' ? { candidate: cand } : (cand.candidate !== undefined ? { ...cand } : cand.toJSON ? cand.toJSON() : cand);
+            if (!init.candidate || !/\.local/i.test(init.candidate)) return null;
+            return { ...init, candidate: init.candidate.replace(/[A-Za-z0-9\-]+\.local/i, ip) };
+        }
+        function mungeSdp(desc, ip) {
+            if (!desc || !ip || !desc.sdp || !/\.local/i.test(desc.sdp)) return desc;
+            return { type: desc.type, sdp: desc.sdp.replace(/[A-Za-z0-9\-]+\.local/gi, ip) };
+        }
+        async function setLocalMunged(desc) {
+            const d = mungeSdp({ type: desc.type, sdp: desc.sdp }, ourLan);
+            await pc.setLocalDescription(d);
+            return d;
+        }
+        async function setRemoteMunged(desc) {
+            await pc.setRemoteDescription(new RTCSessionDescription(mungeSdp({ type: desc.type, sdp: desc.sdp }, peerLan)));
+        }
+        function emitIce(candidate) {
+            if (!candidate || !socket || !roomId) return;
+            const init = candidate.toJSON ? candidate.toJSON() : candidate;
+            socket.emit('ice-candidate', { roomId, candidate: init });
+            const extra = rewriteLocal(init, ourLan);
+            if (extra) socket.emit('ice-candidate', { roomId, candidate: extra });
+        }
+        function addIce(candidate) {
+            if (!pc || !candidate) return;
+            pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+            const extra = rewriteLocal(candidate, peerLan);
+            if (extra) pc.addIceCandidate(new RTCIceCandidate(extra)).catch(() => {});
+        }
         let socket, pc, localStream, roomId, isHost = false, inputLocked = false;
         const logEl = document.getElementById('log');
         const statusEl = document.getElementById('status');
@@ -199,7 +235,141 @@
         }
         updateQualityLabel();
 
-        const AB = { enabled: true, lastLoss: 0, lastRtt: 0, lastAvail: 0, lastQlim: 'none', priorPacketsLost: 0, priorPacketsRcvd: 0 };
+        const AB = { enabled: true, lastLoss: 0, lastRtt: 0, lastAvail: 0, lastQlim: 'none', priorPacketsLost: 0, priorPacketsRcvd: 0, lan: false, icePath: '', userTouched: false, lanApplied: false };
+        const LAN_FLOOR_KBPS = 16000, WAN_DEFAULT_KBPS = 12000, SCREEN_CHUNK = 60000;
+        let hwPath = false, screenChannel = null, inputChannel = null, hwSeq = 0, hwStash = [];
+        let userClickedHost = false;
+        function pasteChord() {
+            return [
+                { type: 'key-down', key: 'Control', code: 'ControlLeft' },
+                { type: 'key-down', key: 'v', code: 'KeyV' },
+                { type: 'key-up', key: 'v', code: 'KeyV' },
+                { type: 'key-up', key: 'Control', code: 'ControlLeft' }
+            ];
+        }
+        async function applyPasteText(text) {
+            if (!text || inputLocked || document.getElementById('viewOnlyToggle').checked) return;
+            await window.electronAPI.writeClipboard(text);
+            await new Promise(r => setTimeout(r, 20));
+            pasteChord().forEach(ev => window.electronAPI.sendInputEvent(ev));
+            log('Pasted from viewer (' + text.length + ' chars)');
+        }
+        function applyViewerMsg(data) {
+            if (data.type === 'input') {
+                if (isHost && !inputLocked && !document.getElementById('viewOnlyToggle').checked) window.electronAPI.sendInputEvent(data.ev);
+                return;
+            }
+            if (data.type === 'paste') { applyPasteText(data.text); return; }
+            if (data.type === 'clipboard-sync') {
+                isHost ? (window.electronAPI.writeClipboard(data.text), log('Host clipboard updated from viewer')) : console.log('Clipboard from host:', data.text);
+            }
+        }
+        function rankVideoCodec(c) {
+            const m = (c.mimeType || '').toLowerCase();
+            if (m === 'video/h264') return 0;
+            if (m === 'video/vp9') return 1;
+            if (m === 'video/av1') return 2;
+            if (m === 'video/vp8') return 9;
+            return 5;
+        }
+        function preferDesktopCodecs(peer) {
+            const caps = RTCRtpSender.getCapabilities && RTCRtpSender.getCapabilities('video');
+            if (!caps || !peer) return;
+            const ordered = caps.codecs.slice().sort((a, b) => rankVideoCodec(a) - rankVideoCodec(b));
+            peer.getTransceivers().forEach(t => { try { t.setCodecPreferences(ordered); } catch (e) {} });
+        }
+        function tuneVideoTrack(track) {
+            if (!track) return;
+            try { track.contentHint = 'detail'; } catch (e) {}
+        }
+        function onUserStreamChange() { AB.userTouched = true; applyStreamSettings(); }
+        function applyLanProfile() {
+            if (!AB.lan || AB.userTouched || AB.lanApplied) return;
+            AB.lanApplied = true;
+            document.getElementById('resolutionSelect').value = 'source';
+            document.getElementById('fpsSelect').value = '60';
+            const slider = document.getElementById('qualitySlider');
+            if (parseInt(slider.value) < LAN_FLOOR_KBPS) { slider.value = LAN_FLOOR_KBPS; updateQualityLabel(); }
+            applyStreamSettings();
+        }
+        function packScreenPackets(au, key, seq) {
+            const flags = key ? 1 : 0;
+            const u8 = au instanceof Uint8Array ? au : new Uint8Array(au);
+            if (u8.byteLength <= SCREEN_CHUNK) {
+                const out = new Uint8Array(6 + u8.byteLength);
+                out[0] = 1; out[1] = flags;
+                new DataView(out.buffer).setUint32(2, seq, true);
+                out.set(u8, 6);
+                return [out];
+            }
+            const n = Math.ceil(u8.byteLength / SCREEN_CHUNK);
+            const parts = [];
+            for (let i = 0; i < n; i++) {
+                const slice = u8.subarray(i * SCREEN_CHUNK, Math.min(u8.byteLength, (i + 1) * SCREEN_CHUNK));
+                const out = new Uint8Array(10 + slice.byteLength);
+                out[0] = 2; out[1] = flags;
+                const dv = new DataView(out.buffer);
+                dv.setUint32(2, seq, true);
+                dv.setUint16(6, i, true);
+                dv.setUint16(8, n, true);
+                out.set(slice, 10);
+                parts.push(out);
+            }
+            return parts;
+        }
+        function sendScreenAu(au, key) {
+            const seq = ++hwSeq;
+            const parts = packScreenPackets(au, key, seq);
+            try {
+                if (!screenChannel || screenChannel.readyState !== 'open') {
+                    if (key) hwStash = parts;
+                    else if (hwStash.length) hwStash.push(...parts);
+                    if (hwStash.length > 40) hwStash = hwStash.slice(-12);
+                    return;
+                }
+                if (!key && screenChannel.bufferedAmount > 256000) return;
+                parts.forEach(p => { try { screenChannel.send(p); } catch (e) {} });
+            } finally {
+                window.electronAPI?.ackHwFrame?.();
+            }
+        }
+        function flushScreenStash() {
+            if (!screenChannel || screenChannel.readyState !== 'open') return;
+            hwStash.forEach(p => { try { screenChannel.send(p); } catch (e) {} });
+            hwStash = [];
+            window.electronAPI?.requestHwIdr?.();
+        }
+        function setupScreenChannel(ch) {
+            screenChannel = ch;
+            ch.binaryType = 'arraybuffer';
+            ch.onopen = () => { log('HW screen channel open'); flushScreenStash(); paintHostChips(); };
+            ch.onclose = () => { if (screenChannel === ch) screenChannel = null; };
+        }
+        function hwPayloadBytes(p) {
+            if (!p) return new Uint8Array(0);
+            if (p instanceof Uint8Array) return p;
+            if (p instanceof ArrayBuffer) return new Uint8Array(p);
+            if (Array.isArray(p.data)) return new Uint8Array(p.data);
+            return new Uint8Array(p);
+        }
+        function rfc1918(ip) {
+            if (!ip) return false;
+            if (ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('169.254.')) return true;
+            const m = String(ip).match(/^172\.(\d+)\./);
+            return !!(m && +m[1] >= 16 && +m[1] <= 31);
+        }
+        function classifyIcePath(pair, byId) {
+            if (!pair) return { lan: false, label: '' };
+            const loc = byId[pair.localCandidateId] || {}, rem = byId[pair.remoteCandidateId] || {};
+            const lt = loc.candidateType || loc.type || '?', rt = rem.candidateType || rem.type || '?';
+            const la = loc.address || loc.ip || '', ra = rem.address || rem.ip || '';
+            const lan = (lt === 'host' && rt === 'host') || (rfc1918(la) && rfc1918(ra));
+            return { lan, label: (lan ? 'lan' : 'wan') + ' ' + lt + '-' + rt };
+        }
+        function keyFromDom(e) {
+            const k = e.key === ' ' ? 'Space' : e.key;
+            return { type: e.type === 'keyup' ? 'key-up' : 'key-down', key: k, code: e.code };
+        }
         function onSliderInput() {
             updateQualityLabel();
             if (document.getElementById('autoBitrateToggle').checked) { document.getElementById('autoBitrateToggle').checked = false; toggleAutoBitrate(); }
@@ -235,9 +405,11 @@
             let next = cur;
             if (lossBad || rttBad || bwLim) next = Math.max(500, Math.round(cur * 0.82));
             else if (lossOk && rttOk && !cpuLim) next = Math.min(20000, cur + 500);
-            if (AB.lastAvail > 0) next = Math.min(next, Math.max(500, Math.round(AB.lastAvail / 1000 * 0.92)));
+            if (AB.lan) next = Math.max(next, LAN_FLOOR_KBPS);
+            if (AB.lastAvail > 0 && !AB.lan) next = Math.min(next, Math.max(500, Math.round(AB.lastAvail / 1000 * 0.92)));
             next = Math.round(next / 500) * 500;
             if (Math.abs(next - cur) >= 500) { slider.value = next; updateQualityLabel(); applyBitrate(); }
+            applyLanProfile();
         }
 
         function getResolution() {
@@ -255,21 +427,40 @@
             const constraints = { frameRate: { ideal: fps } };
             if (res) { constraints.width = { ideal: res.width }; constraints.height = { ideal: res.height }; }
             const vt = localStream.getVideoTracks()[0];
-            if (vt) { try { await vt.applyConstraints(constraints); log(`Stream: ${res ? res.width + '×' + res.height : 'native'} @ ${fps}fps`); } catch(e) { log('Constraint apply failed: ' + e.message, 'error'); } }
+            if (vt) {
+                tuneVideoTrack(vt);
+                try { await vt.applyConstraints(constraints); log(`Stream: ${res ? res.width + '×' + res.height : 'native'} @ ${fps}fps`); } catch(e) { log('Constraint apply failed: ' + e.message, 'error'); }
+            }
             localStream.getAudioTracks().forEach(t => { t.enabled = audioOn; });
             applyBitrate();
         }
 
+        function lockEncodeParams(params, kbps) {
+            if (!params.encodings || !params.encodings.length) params.encodings = [{}];
+            params.degradationPreference = 'maintain-resolution';
+            params.encodings[0].degradationPreference = 'maintain-resolution';
+            params.encodings[0].scaleResolutionDownBy = 1;
+            if (kbps > 0) params.encodings[0].maxBitrate = kbps * 1000;
+            return params;
+        }
+        function encodeWasDownscaled(params, sentW, srcW) {
+            const s = params && params.encodings && params.encodings[0] && params.encodings[0].scaleResolutionDownBy;
+            if (s != null && s > 1) return true;
+            return !!(sentW && srcW && sentW < srcW * 0.95);
+        }
         function applyBitrate() {
             if (!pc) return;
             const kbps = parseInt(document.getElementById('qualitySlider').value);
             pc.getSenders().forEach(async sender => {
                 if (sender.track?.kind !== 'video') return;
-                const params = sender.getParameters();
-                if (!params.encodings?.length) params.encodings = [{}];
-                params.encodings[0].maxBitrate = kbps * 1000;
+                const params = lockEncodeParams(sender.getParameters(), kbps);
                 try { await sender.setParameters(params); } catch(e) {}
             });
+            if (hwPath) window.electronAPI?.updateHwCapture?.({ fps: parseInt(document.getElementById('fpsSelect').value), kbps });
+        }
+        function onTrayToggle() {
+            const on = document.getElementById('trayToggle').checked;
+            localStorage.setItem('amni-tray-host', on ? '1' : '0');
         }
 
         function toggleInputLock() {
@@ -287,17 +478,19 @@
             socket.on('connect_error', () => log('Cannot reach signaling server — is it running?', 'error'));
             socket.on('offer', async ({ offer }) => {
                 if (!pc) createPC();
-                await pc.setRemoteDescription(new RTCSessionDescription(offer));
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
+                await setRemoteMunged(offer);
+                preferDesktopCodecs(pc);
+                const answer = await setLocalMunged(await pc.createAnswer());
                 socket.emit('answer', { roomId, answer });
                 log('WebRTC answer sent');
             });
             socket.on('answer', async ({ answer }) => {
-                await pc?.setRemoteDescription(new RTCSessionDescription(answer));
+                if (pc) await setRemoteMunged(answer);
                 log('WebRTC answer received', 'success');
             });
-            socket.on('ice-candidate', ({ candidate }) => pc?.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {}));
+            socket.on('your-lan', (ip) => { ourLan = ip || ourLan; });
+            socket.on('peer-lan', (ip) => { peerLan = ip || peerLan; });
+            socket.on('ice-candidate', ({ candidate }) => addIce(candidate));
             socket.on('host-disconnected', () => { log('Host disconnected', 'error'); setStatus('Disconnected', '#ef4444'); });
         }
 
@@ -308,7 +501,7 @@
             const inn = document.getElementById('chipIn');
             if (sig) sig.textContent = socket && socket.connected ? 'sig up' : 'sig down';
             const st = pc ? pc.connectionState : 'idle';
-            if (rtc) rtc.textContent = 'rtc ' + st;
+            if (rtc) rtc.textContent = 'rtc ' + st + (AB.icePath ? ' ' + AB.icePath : '');
             const inOpen = dataChannel && dataChannel.readyState === 'open';
             if (inn) inn.textContent = inOpen ? 'input p2p' : (socket && socket.connected ? 'input relay' : 'input none');
         }
@@ -319,16 +512,15 @@
                 if (hostIceTries < 3) {
                     hostIceTries++;
                     log('ICE restart ' + hostIceTries);
-                    const offer = await pc.createOffer({ iceRestart: true });
-                    await pc.setLocalDescription(offer);
+                    const offer = await setLocalMunged(await pc.createOffer({ iceRestart: true }));
                     socket.emit('offer', { roomId, offer });
                 }
             } catch (e) { log('ICE restart failed: ' + e.message, 'error'); }
             finally { hostRecoverBusy = false; paintHostChips(); }
         }
         function createPC() {
-            pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-            pc.onicecandidate = ({ candidate }) => candidate && socket.emit('ice-candidate', { roomId, candidate });
+            pc = new RTCPeerConnection({ iceServers: ICE_SERVERS, iceCandidatePoolSize: 4 });
+            pc.onicecandidate = ({ candidate }) => emitIce(candidate);
             pc.onconnectionstatechange = () => {
                 log(`WebRTC: ${pc.connectionState}`);
                 paintHostChips();
@@ -341,22 +533,29 @@
                 log('Remote desktop stream connected', 'success');
                 setStatus('Viewing \u2022 E2EE', '#22c55e');
             };
-            isHost ? (dataChannel = pc.createDataChannel('clipboard'), setupDataChannel(dataChannel)) : (pc.ondatachannel = (e) => { dataChannel = e.channel; setupDataChannel(dataChannel); });
+            if (isHost) {
+                inputChannel = pc.createDataChannel('input', { ordered: true, priority: 'high' });
+                setupDataChannel(inputChannel);
+                dataChannel = pc.createDataChannel('clipboard', { ordered: true });
+                setupDataChannel(dataChannel);
+                setupScreenChannel(pc.createDataChannel('screen', { ordered: false, maxRetransmits: 0, priority: 'low' }));
+            } else {
+                pc.ondatachannel = (e) => {
+                    if (e.channel.label === 'screen') setupScreenChannel(e.channel);
+                    else if (e.channel.label === 'input') { inputChannel = e.channel; setupDataChannel(inputChannel); }
+                    else { dataChannel = e.channel; setupDataChannel(dataChannel); }
+                };
+            }
             if (isHost && localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+            preferDesktopCodecs(pc);
+            applyBitrate();
         }
 
         function setupDataChannel(channel) {
             channel.onopen = () => { log('E2EE Data channel opened'); applyBitrate(); paintHostChips(); hostIceTries = 0; };
             channel.onmessage = async (e) => {
                 if (typeof e.data !== 'string') return;
-                const data = JSON.parse(e.data);
-                if (data.type === 'input') {
-                    if (isHost && !inputLocked && !document.getElementById('viewOnlyToggle').checked) window.electronAPI.sendInputEvent(data.ev);
-                    return;
-                }
-                if (data.type === 'clipboard-sync') {
-                    isHost ? (window.electronAPI.writeClipboard(data.text), log('Host clipboard updated from viewer')) : console.log('Clipboard from host:', data.text);
-                }
+                try { applyViewerMsg(JSON.parse(e.data)); } catch (err) {}
             };
         }
 
@@ -376,6 +575,8 @@
                 if (!pc) return;
                 const stats = await pc.getStats();
                 let rtt = 0, loss = 0, avail = 0, qlim = 'none', haveRtt = false, haveLoss = false;
+                const iceById = {};
+                let icePair = null;
                 stats.forEach(r => {
                     if (r.type === 'inbound-rtp' && r.kind === 'video') {
                         const now = Date.now();
@@ -390,12 +591,14 @@
                         if (dRcvd + dLost > 0) { loss = Math.max(0, dLost / (dRcvd + dLost)); haveLoss = true; }
                     }
                     if (r.type === 'candidate-pair' && (r.state === 'succeeded' || r.nominated)) {
+                        icePair = r;
                         if (r.currentRoundTripTime != null) {
                             rtt = r.currentRoundTripTime; haveRtt = true;
                             document.getElementById('statLatency').textContent = Math.round(rtt*1000)+'ms';
                         }
                         if (r.availableOutgoingBitrate) avail = r.availableOutgoingBitrate;
                     }
+                    if (r.type === 'local-candidate' || r.type === 'remote-candidate') iceById[r.id] = r;
                     if (r.type === 'remote-inbound-rtp' && r.kind === 'video') {
                         if (r.fractionLost != null) { loss = r.fractionLost; haveLoss = true; }
                         if (r.roundTripTime != null && !haveRtt) { rtt = r.roundTripTime; haveRtt = true; document.getElementById('statLatency').textContent = Math.round(rtt*1000)+'ms'; }
@@ -408,8 +611,14 @@
                         document.getElementById('statFps').textContent = (r.framesPerSecond || 0).toFixed(0);
                         if (r.frameWidth) document.getElementById('statRes').textContent = r.frameWidth+'×'+r.frameHeight;
                         if (r.qualityLimitationReason) qlim = r.qualityLimitationReason;
+                        const vt = localStream && localStream.getVideoTracks()[0];
+                        const srcW = vt && vt.getSettings && vt.getSettings().width;
+                        if (isHost && !hwPath && (qlim === 'resolution' || encodeWasDownscaled(null, r.frameWidth, srcW))) applyBitrate();
                     }
                 });
+                const ice = classifyIcePath(icePair, iceById);
+                AB.lan = ice.lan;
+                AB.icePath = ice.label;
                 if (haveRtt) AB.lastRtt = rtt;
                 if (haveLoss) AB.lastLoss = loss;
                 if (avail) AB.lastAvail = avail;
@@ -424,6 +633,8 @@
         }
 
         let availableSources = [];
+        const savedRoom = localStorage.getItem('amni-custom-code');
+        if (savedRoom) document.getElementById('customRoomCode').value = savedRoom;
         window.electronAPI.getSources().then(sources => {
             availableSources = sources;
             const select = document.getElementById('monitorSelect');
@@ -443,13 +654,38 @@
             const audioOn = document.getElementById('audioToggle').checked;
             const videoConstraints = { chromeMediaSource: 'desktop', chromeMediaSourceId: src.id, frameRate: { ideal: fps } };
             if (res) { videoConstraints.maxWidth = res.width; videoConstraints.maxHeight = res.height; }
-            try {
-                localStream = await navigator.mediaDevices.getUserMedia({ audio: audioOn ? { mandatory: { chromeMediaSource: 'desktop' } } : false, video: { mandatory: videoConstraints } });
-            } catch (err) {
-                log('Falling back to video-only capture', 'error');
-                localStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: videoConstraints } });
+            const monIdx = Math.max(0, availableSources.findIndex(s => s.id === sourceId));
+            const kbps = parseInt(document.getElementById('qualitySlider').value) || WAN_DEFAULT_KBPS;
+            hwPath = false;
+            if (window.electronAPI?.startHwCapture) {
+                try {
+                    const hw = await window.electronAPI.startHwCapture({ fps, kbps, output: monIdx });
+                    if (hw && hw.ok) {
+                        hwPath = true;
+                        log(`HW capture ${hw.encoder || 'h264'} ${hw.width || ''}×${hw.height || ''} @ ${fps}fps`, 'success');
+                    } else {
+                        log('HW capture unavailable — Chromium desktop capture' + (hw && hw.reason ? ' (' + hw.reason + ')' : ''));
+                    }
+                } catch (e) { log('HW capture failed — Chromium desktop capture'); }
             }
-            localStream.getTracks().forEach(t => t.onended = () => endSession(true));
+            try {
+                if (hwPath) {
+                    if (audioOn) {
+                        try { localStream = await navigator.mediaDevices.getUserMedia({ audio: { mandatory: { chromeMediaSource: 'desktop' } }, video: false }); }
+                        catch (e) { localStream = null; log('Desktop audio unavailable', 'error'); }
+                    }
+                } else {
+                    localStream = await navigator.mediaDevices.getUserMedia({ audio: audioOn ? { mandatory: { chromeMediaSource: 'desktop' } } : false, video: { mandatory: videoConstraints } });
+                }
+            } catch (err) {
+                if (hwPath) { localStream = null; }
+                else {
+                    log('Falling back to video-only capture', 'error');
+                    localStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: videoConstraints } });
+                }
+            }
+            if (localStream) localStream.getVideoTracks().forEach(tuneVideoTrack);
+            localStream?.getTracks().forEach(t => t.onended = () => endSession(true));
             isHost = true;
             socket.emit('create-room', customCode);
             socket.once('room-created', async (id) => {
@@ -463,11 +699,14 @@
                 setStatus('Hosting \u2022 E2EE', '#22c55e');
                 setLiveSettings(true);
                 log(`Room ${roomId} created — sharing: ${src.name}`, 'success');
+                if (userClickedHost && document.getElementById('trayToggle').checked && window.electronAPI?.hideToTray) {
+                    const hid = await window.electronAPI.hideToTray('Hosting ' + roomId);
+                    if (hid && hid.status === 'hidden') log('Hosting in tray — click the Amni-Connect icon to show the window');
+                }
                 socket.on('viewer-joined', async () => {
                     log('Viewer joined — sending offer');
                     createPC();
-                    const offer = await pc.createOffer();
-                    await pc.setLocalDescription(offer);
+                    const offer = await setLocalMunged(await pc.createOffer());
                     socket.emit('offer', { roomId, offer });
                 });
                 socket.on('input-event', (data) => {
@@ -505,6 +744,7 @@
 
         async function pairUrl() {
             const ip = await window.electronAPI.getLocalIp();
+            if (ip && ip !== 'localhost') ourLan = ip;
             return `http://${ip}:3389/viewer?host=${ip}&code=${roomId}`;
         }
         async function paintPairQr() {
@@ -523,13 +763,16 @@
             log(`Mobile link copied: ${url}`, 'success');
         }
 
-        function endSession() {
-            if (confirm('End this session?')) { statsLoop && clearInterval(statsLoop); location.reload(); }
+        function endSession(force) {
+            window.electronAPI?.setTrayHost?.(false);
+            window.electronAPI?.showWindow?.();
+            if (force || confirm('End this session?')) { statsLoop && clearInterval(statsLoop); location.reload(); }
         }
 
         const overlay = document.getElementById('inputOverlay');
         const joinCtl = () => !isHost && roomId && !document.getElementById('viewOnlyToggle').checked;
         const sendIn = (ev) => {
+            if (inputChannel && inputChannel.readyState === 'open') { try { inputChannel.send(JSON.stringify({ type: 'input', ev })); return; } catch (e) {} }
             if (dataChannel && dataChannel.readyState === 'open') { try { dataChannel.send(JSON.stringify({ type: 'input', ev })); return; } catch (e) {} }
             if (socket && socket.connected && roomId) { socket.emit('input-event', { ...ev, roomId }); return; }
         };
@@ -560,11 +803,19 @@
         const joinEditable = () => ['INPUT', 'TEXTAREA', 'SELECT'].includes((document.activeElement || {}).tagName);
         const JOIN_PASS = ['F5', 'F11', 'F12'];
         const joinHeldKeys = new Set();
-        document.addEventListener('keydown', (e) => { if (!joinCtl() || joinEditable() || JOIN_PASS.includes(e.key)) return; e.preventDefault(); joinHeldKeys.add(e.key); sendIn({ type: 'key-down', key: e.key }); });
-        document.addEventListener('keyup', (e) => { if (JOIN_PASS.includes(e.key)) return; joinHeldKeys.delete(e.key); if (!joinCtl()) return; e.preventDefault(); sendIn({ type: 'key-up', key: e.key }); });
+        document.addEventListener('keydown', (e) => { if (!joinCtl() || joinEditable() || JOIN_PASS.includes(e.key)) return; e.preventDefault(); joinHeldKeys.add(e.key); sendIn(keyFromDom(e)); });
+        document.addEventListener('keyup', (e) => { if (JOIN_PASS.includes(e.key)) return; joinHeldKeys.delete(e.key); if (!joinCtl()) return; e.preventDefault(); sendIn(keyFromDom(e)); });
         window.addEventListener('blur', () => { if (!joinCtl()) return; joinHeldKeys.forEach(k => sendIn({ type: 'key-up', key: k })); joinHeldKeys.clear(); joinEndMouse(); });
 
         window.electronAPI?.onStatusUpdate?.(msg => log(msg));
+        window.electronAPI?.onTrayEndSession?.(() => endSession(true));
+        if (localStorage.getItem('amni-tray-host') === '1') document.getElementById('trayToggle').checked = true;
+        window.electronAPI?.onHwVideo?.(msg => {
+            if (msg.kind === 1) { hwPath = true; window.electronAPI?.ackHwFrame?.(); return; }
+            if (msg.kind !== 2) { window.electronAPI?.ackHwFrame?.(); return; }
+            sendScreenAu(hwPayloadBytes(msg.payload), !!(msg.flags & 1));
+        });
+        window.addEventListener('beforeunload', () => { try { window.electronAPI?.stopHwCapture?.(); } catch (e) {} });
         document.getElementById('autoHint').classList.toggle('on', document.getElementById('autoBitrateToggle').checked);
         log('Amni-Connect initialized — End-to-End Encrypted', 'success');
     </script>

@@ -6,6 +6,14 @@
 
 **A secure, modern alternative to Windows Remote Desktop.**
 
+## Download
+
+Windows installer (default): **[Releases → latest](https://github.com/Amnibro/Amni-Connect/releases/latest)**
+
+Direct file: [Amni-Connect-Setup-1.5.9.exe](https://github.com/Amnibro/Amni-Connect/releases/latest/download/Amni-Connect-Setup-1.5.9.exe)
+
+Run the Setup exe. Allow UAC. If SmartScreen appears: **More info → Run anyway**. No npm, cargo, or schtasks. Packaged hosts pull later versions from the same Releases page.
+
 ### Architecture
 - **Electron** — Cross-platform desktop app (Windows, macOS, Linux)
 - **Rust** — High-performance input controller (`enigo` for mouse/keyboard simulation)
@@ -29,7 +37,7 @@ Amni-Connect/
 └── README.md
 ```
 
-### How to Run
+### Run from source (developers)
 
 1. **Start the signaling server**
    ```bash

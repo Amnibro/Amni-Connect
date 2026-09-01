@@ -1,5 +1,116 @@
 # Amni-Connect Changelog
 
+## v1.5.9 — tap lag, paste, voice, Setup.exe (2026-09-01)
+
+### Fixed
+- **Taps felt late after the quality bump.** Input was sharing an SCTP association with a 12–16 Mbps `screen` data channel, and every click waited on `ipcRenderer.invoke`. Input now has its own high-priority `input` channel; the screen channel is low-priority and drops P-frames if more than 256 KB is queued. Host input is fire-and-forget IPC. Hardware frames are coalesced (`hwPending`) so video IPC cannot stall clicks.
+- **Launch looked like a crash.** Auto-host + default tray-hide vanished the window on start. Tray is off unless you turn it on, and auto-host never hides.
+
+### Added
+- **Paste from the phone.** Toolbar **Paste** reads the mobile clipboard and the host writes it then injects Ctrl+V. If the browser blocks clipboard read, the clip sheet focuses so you can long-press paste and tap **Paste to PC**.
+- **Voice input.** Toolbar **Mic** uses Web Speech (Chrome) and pastes the transcript into the remote PC.
+- **One-click Setup.exe from GitHub Releases.** Default install is [github.com/Amnibro/Amni-Connect/releases/latest](https://github.com/Amnibro/Amni-Connect/releases/latest). `npm run release` publishes `Amni-Connect-Setup-${version}.exe` there. The installer drops `amni-control.exe` into `resources/` and registers `AmniControlElevated`. Packaged apps check that same release feed for updates. Windows may SmartScreen-warn because the exe is unsigned — More info → Run anyway. Fresh installs no longer default the room code to `ANTMAN-PC`; a saved code is restored from localStorage so your PC still auto-hosts.
+
+### Notes
+- The running elevated daemon still locks `rust/target/release/amni-control.exe`. Dist copies a freshly built binary from `build/amni-control.exe`. After install, restart the PC or `schtasks /run /tn AmniControlElevated` so input uses the new High-IL process.
+
+## v1.5.8 — no silent downscale, tray host (2026-08-30)
+
+### Changed
+- **`scaleResolutionDownBy` is locked at 1 for the life of the sender.** `lockEncodeParams` writes it (and `maintain-resolution`) on every `applyBitrate`, immediately after `addTrack`, and again from the stats loop if outbound `frameWidth` falls below the capture track or `qualityLimitationReason` is `resolution`.
+- **Host chrome no longer runs `backdrop-filter: blur`.** Header and side panel are opaque `var(--surface)` so the compositor is not blurring a 1200×800 window while you stream.
+- **Tray while hosting (default on).** After the room is created the host window hides to the tray; click the icon or use Show. Close-to-tray does not tear down `amni-control` or the session. Tray menu: Show / End session / Quit. Renderer stays awake (`backgroundThrottling: false`, `disable-renderer-backgrounding`) so encode and input keep running while hidden.
+
+### Notes
+- Backups: `backups/*v1.5.8_pre_tray_scale.bak`. Tray icon: `assets/icon.png`.
+
+## v1.5.7 — sharper stream, less CPU (2026-08-29)
+
+### Changed
+- **Defaults match a desktop, not a webcam.** Host now starts at **source resolution**, **60 fps**, **12 Mbps**. WAN AIMD still drops bitrate; LAN floors at **16 Mbps** and, unless you touched the controls, forces source + 60 fps.
+- **Encoder treats this as text, not video.** Capture tracks get `contentHint = 'detail'`. RTP encodings use `degradationPreference = 'maintain-resolution'` and `scaleResolutionDownBy = 1`, so a bad second drops frames instead of smearing glyphs.
+- **Codec order is H.264, then VP9, then AV1; VP8 last.** Both host offer and viewer answer call `setCodecPreferences` so phones can hardware-decode.
+- **Viewer zoom no longer bilinear-smears.** Zoom CSS transition is gone. Past 1.02× the `<video>` / canvas use `image-rendering: pixelated`.
+- **Windows hardware path.** `amni-control` DXGI-duplicates the desktop, encodes H.264 with a Media Foundation hardware MFT when one exists (software MFT otherwise), and ships Annex-B on `127.0.0.1:7879`. Electron forwards that on an unreliable `screen` data channel; the viewer decodes with WebCodecs onto a canvas. If hello does not arrive in 2.8s, host falls back to the existing Chromium `desktopCapturer` path.
+
+### Notes
+- Backups: `backups/*v1.5.7_pre_stream_quality.bak`.
+- Tests: `tests/test_stream_quality.js`; existing `test_lan_ice.js` / `test_zoom_input_gate.js`. Rebuild `amni-control.exe` (kill the elevated task first) or the host stays on Chromium capture.
+
+## v1.5.6 — sig down: 3389 was listening but not answering (2026-08-23)
+
+Port 3389 is forwarded, so RDP scanners pile TCP onto the Node signaling server. The listen socket stayed up while HTTP/`socket.io` stopped answering (`curl /health` timed out, host chip `sig down`). `headersTimeout`/`requestTimeout`/`keepAliveTimeout` now drop those half-open probes so a new host websocket can connect.
+
+## v1.5.5 — Shift + anything typed nothing on the remote PC (2026-08-17)
+
+### Fixed
+- **Every capital letter and every shifted symbol was dropped; `Shift` itself arrived fine.** The
+  bug is inside enigo 0.2.1. `get_scancode(c)` calls `VkKeyScanW(c)`, which returns the virtual key
+  in the low byte **and the required shift state in the high byte**, then hands that whole value to
+  `MapVirtualKeyW`, which takes a virtual key only. Measured on this machine:
+  `'a'` → 0x0041 → scan 0x1E; `'A'` → 0x0141 → **0**; `'!'` → 0x0131 → **0**. Zero means "no
+  translation", so enigo returns `InputError::Mapping` and never reaches `SendInput`. The viewer
+  sends `e.key`, and for Shift+A that string *is* `"A"` — straight into the hole.
+- `shift_base(c)` maps the 26 capitals and the 21 shifted symbols to the **physical key** they sit
+  on, and `key_from_str` resolves single characters through it, so enigo only ever receives a
+  character `VkKeyScanW` can map without a shift state. The Shift the viewer is already holding
+  produces the capital, exactly as a real keyboard does.
+- `wants_shift` + `Ctl.shift_held`/`auto_shift`: if a client sends `"A"` with **no** Shift of its
+  own, the daemon presses Shift around the key itself and releases it on the matching key-up. A
+  client that does send Shift is left alone.
+- Same change fixes **modifier combos** (`Ctrl+Shift+T` sends `e.key:"T"` and died in the same
+  mapping error) and **stuck keys** (release Shift before the letter and the browser reports keyup
+  as `"a"` against a keydown of `"A"`; both now resolve to one physical key).
+- `s.len()==1` → `s.chars().count()==1`. Byte length excluded every non-ASCII single character.
+
+### Verified
+Live probe (`tests/probe_shift_keys.py`) into a real Chrome text field, daemon confirmed at **High**
+integrity, click coordinates calibrated from two injected clicks. Before: `abc`. After:
+`abcABC!@?D` — capitals, symbols, and a bare uppercase with no client Shift, each arriving with
+`shiftKey:true`. `errs` stayed **0** in the broken case, so the ping counters cannot be used to
+detect this class of failure.
+
+## v1.5.4 — Remote input died at the last inch: UIPI, not a wedge (2026-08-17)
+
+### Fixed
+- **The laptop could not click or type into the PC.** Every hop was healthy — viewer socket connected over Tailscale, `server.js` relayed `input-event` with no `input-dropped`, host gates (`inputLocked`, `viewOnlyToggle`) clear, Electron holding an ESTABLISHED socket to `127.0.0.1:7878`, the daemon parsing every event. The cursor did not move. `amni-control.log` had 103 x `SetCursorPos failed os=Some(6)` (ERROR_INVALID_HANDLE) with the cursor pinned at 442,1035.
+- **Root cause is UIPI, not the "daemon wedge" chased in v1.5.2.** `amni-control.exe` ran at **Medium** integrity as a child of non-elevated Electron. Whenever a **High**-integrity window held foreground, Windows silently discarded its `SendInput` and failed `SetCursorPos` with error 6. Nothing in the process is broken — the same daemon works or does not work depending only on who owns the foreground window.
+- A/B on one live daemon, same second, only the foreground changed:
+
+  | foreground | daemon IL | before | after | result |
+  |---|---|---|---|---|
+  | WindowsTerminal (elevated) | Medium | 900,900 | 900,900 | `SetCursorPos failed os=Some(6)` |
+  | electron (non-elevated) | Medium | 900,900 | 688,288 | lands |
+  | WindowsTerminal (elevated) | **High** | 688,288 | 2064,864 | lands, errs=0 |
+
+- **This retires the v1.5.2 "wedges while alive" diagnosis.** Killing the daemon appeared to restore control only because a non-elevated window happened to hold focus on the next test; it "re-wedged ~3 minutes later" when an elevated window came back to the front. Same symptom, wrong cause. Do not re-chase the wedge.
+- Ruled out first, with measurements: lock screen / UAC secure desktop (`OpenInputDesktop` -> `Default`, LogonUI=0, consent=0); stale process (a fresh daemon at errs=0/misses=0/direct=false still could not move the cursor); relay failure; view-only gate.
+
+### Changed
+- Daemon now starts **elevated** through the scheduled task `AmniControlElevated` (Interactive logon, RunLevel Highest, MultipleInstances IgnoreNew, no time limit). A `requireAdministrator` manifest was rejected: its UAC prompt renders on the secure desktop, which a **remote** user cannot click.
+- `main.js:trySpawnRust` runs `schtasks /run /tn AmniControlElevated`, and on a non-zero exit falls back to direct spawn with a visible `hostStatus` warning naming the consequence.
+- `main.js:killStrayRust` ends the task **before** `taskkill /IM` — a Medium IL Electron cannot kill a High IL child, which would strand port 7878 across every restart.
+- `window-all-closed` now calls `killStrayRust()`.
+
+### Verified (deployed instance, live, no restart)
+- Elevated daemon pid 32788 `TokenElevation=1` owns 7878; Electron reconnected on its own.
+- Full chain through the real signaling server (`join ANTMAN-PC` -> `input-event`): `{0.1,0.1}` -> cursor 274,114 (expect 275,115); `{0.6,0.35}` -> cursor 1651,403 (expect 1651,403). Zero daemon errors.
+- `schtasks /run` idempotent (exit 0, one daemon). `node --check main.js` clean.
+- Backup `backups/main.js.v1.5.2_pre_elevated_control.bak`.
+
+### Still open
+- Input cannot reach the UAC secure desktop or the lock screen; that needs a session-0 service with `uiAccess` and a signed binary in Program Files.
+- `Ctl.direct` never resets once tripped, and `heal()` rebuilds enigo even when the failing path is raw `SetCursorPos`. Harmless at High IL.
+
+## v1.5.3 — LAN path was invisible; laptop keys dropped unmapped codes (2026-08-16)
+- Chrome viewers still emit `*.local` host candidates. Signaling now tells each socket `your-lan` / `peer-lan` from the TCP source (RFC1918 only). Both ends rewrite `.local` ICE lines to that IPv4 and trickle a second candidate so host-host can nominate without mDNS. Offer/answer SDP is munged the same way before setLocal/setRemote (Chromium often ignores trickle host candidates it did not gather).
+
+- ICE never labeled the nominated pair. Two laptops on the same Wi-Fi often settled `srflx-srflx` (public hairpin) because Chromium hid host IPs behind mDNS, so the UI had nothing called LAN and AIMD treated STUN's WAN `availableOutgoingBitrate` as the cap.
+- Electron now disables `WebRtcHideLocalIpsWithMdns`. Host + viewer chips show `lan host-host` vs `wan srflx-srflx`. LAN floors AIMD at 8 Mbps and ignores the STUN avail cap.
+- Hardware keys sent only `e.key`. Rust `key_from_str` ignored `Space` (string), F-keys, `KeyA`/`DigitN` codes. Viewer/Join now send `{key,code}`; rust maps both and logs unmapped.
+- Tests: `node tests/test_lan_ice.js` 10/10. `cargo check` clean. Release exe not rebuilt (file locked by a running daemon).
+- Not a zoom/touch regression. Same daemon wedge from v1.5.2 still kills keys if `amni-control` is wedged.
+
 ## v1.5.2 — Pinch to zoom disabled all touch control (2026-08-16)
 
 ### Fixed
