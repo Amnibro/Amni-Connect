@@ -4,7 +4,7 @@
 ![Source](https://img.shields.io/badge/Source-Available-lightgrey)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-informational)
 
-**A secure, modern alternative to Windows Remote Desktop.**
+**A secure, modern alternative to Windows Remote Desktop and Teamviewer.**
 
 ## Download
 
