@@ -1,12 +1,19 @@
 # Amni-Connect Changelog
 
-## v1.5.10 — viewer toolbar + keyboard layout (2026-09-01)
+## v1.5.10 — viewer toolbar, PR #1 host UX (2026-09-01)
 
 ### Fixed
 - **Mobile viewer toolbar was mushed.** Ten buttons wrapped into a cramped two-row grid. Toolbar is now a single horizontal scroll row with proper tap targets.
 - **On-screen keyboard hid under the bottom bar.** Keyboard and clip sheet used a fixed 52px offset while the toolbar was taller. They now sit on the measured toolbar height (`--toolbar-h`).
 - **Packaged host signaling could fail to start.** Missing `multer` dependency and writing `received-files` inside `app.asar` prevented `:3389` from binding. Inbox now lives under `%APPDATA%\amni-connect\received-files`.
 - **Elevated task broke on `Program Files` paths.** Installer/register script now quotes the daemon path so `AmniControlElevated` runs the packed `amni-control.exe`.
+- **Viewer dialled `:3389` behind HTTPS tunnels** (merged from PR #1). Default-port pages now use 443 for https / 3389 for http; hosts with their own port are not double-suffixed.
+
+### Added (PR #1 — @ancsemi)
+- **Live screen preview picker** with thumbnails, resolution, and MAIN badge.
+- **Draggable splitter** between settings and connection log (size persists).
+- **Pairing address field** for Tailscale, DDNS, or reverse-proxy links and QR.
+- **`Amni-Connect.bat`** dev launcher with preflight checks.
 
 ## v1.5.9 — tap lag, paste, voice, Setup.exe (2026-09-01)
 

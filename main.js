@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, clipboard, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, clipboard, Tray, Menu, nativeImage, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -324,10 +324,33 @@ ipcMain.handle('get-local-ip', () => {
   return 'localhost';
 });
 
+// Thumbnails are what let the host UI show a live preview of each screen instead of
+// making you guess whether the monitor you want is 1, 2 or 3. Capture cost scales with
+// this size, so keep it small: it is a picker tile, not the stream.
+const THUMB_SIZE = { width: 480, height: 270 };
+
 ipcMain.handle('get-sources', async () => {
   try {
-    const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } });
-    return sources.map(s => ({ id: s.id, name: s.name }));
+    const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: THUMB_SIZE });
+    let displays = [], primaryId = null;
+    try {
+      displays = screen.getAllDisplays();
+      primaryId = String(screen.getPrimaryDisplay().id);
+    } catch (_) {}
+    return sources.map((s, i) => {
+      const d = displays.find(x => String(x.id) === String(s.display_id));
+      const empty = !s.thumbnail || s.thumbnail.isEmpty();
+      return {
+        id: s.id,
+        name: s.name,
+        display_id: s.display_id,
+        index: i + 1,
+        primary: !!d && String(d.id) === primaryId,
+        width: d ? Math.round(d.bounds.width * d.scaleFactor) : null,
+        height: d ? Math.round(d.bounds.height * d.scaleFactor) : null,
+        thumbnail: empty ? null : 'data:image/jpeg;base64,' + s.thumbnail.toJPEG(70).toString('base64')
+      };
+    });
   } catch (e) {
     console.error('[amni-connect] desktopCapturer failed:', e && e.message ? e.message : e);
     return [];

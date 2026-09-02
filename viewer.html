@@ -336,10 +336,14 @@ function connect() {
   wantStay = true; iceTries = 0;
   localStorage.setItem('amni-last-host', host);
   localStorage.setItem('amni-last-code', code);
-  const port = location.port || 3389;
+  // location.port is EMPTY on default ports, so behind a tunnel or reverse proxy on 443
+  // this fell back to 3389 and dialled a port that does not exist there. Signalling then
+  // never connected, even though the page itself had loaded fine over https.
   const proto = location.protocol === 'https:' ? 'https' : 'http';
+  const port = location.port || (proto === 'https' ? '443' : '3389');
   if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) peerLan = host;
-  socket = io(`${proto}://${host}:${port}`, { transports: ['websocket','polling'] });
+  const origin = /:\d+$/.test(host) ? `${proto}://${host}` : `${proto}://${host}:${port}`;
+  socket = io(origin, { transports: ['websocket','polling'] });
   socket.on('connect', () => { setStatus('Connected to signaling server'); socket.emit('join-room', code); paintLinkChips(); });
   socket.on('connect_error', () => setStatus('Cannot reach host — check IP and ensure server is running'));
   socket.on('room-joined', (id) => {

@@ -36,11 +36,39 @@
         #remoteScreen { flex: 1; background: #000; border-radius: 14px; overflow: hidden; position: relative; border: 1px solid #334155; display: none; }
         #remoteScreen video { width: 100%; height: 100%; object-fit: contain; }
         .overlay { position: absolute; inset: 0; pointer-events: none; }
+        .mon-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; }
+        .mon-head > span { font-size: 11px; color: var(--mut); font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; }
+        .mon-refresh { width: auto; margin: 0; padding: 5px 10px; font-size: 11px; background: #475569; border-radius: 8px; }
+        .mon-refresh:hover { background: #5b6b80; }
+        .mon-refresh:disabled { opacity: .55; cursor: default; }
+        .mon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(126px, 1fr)); gap: 8px; margin-bottom: 10px; }
+        .mon-card { position: relative; width: 100%; margin: 0; padding: 0; background: #1e2937; border: 1.5px solid #475569; border-radius: 10px; overflow: hidden; cursor: pointer; text-align: left; transition: border-color .15s, transform .15s; }
+        .mon-card:hover { background: #1e2937; border-color: #6366f1; transform: translateY(-1px); }
+        .mon-card.sel { border-color: var(--you); box-shadow: 0 0 0 2px color-mix(in srgb, var(--you) 32%, transparent); }
+        .mon-card img, .mon-card .mon-none { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #000; }
+        .mon-card .mon-none { display: flex; align-items: center; justify-content: center; background: #0f141c; color: var(--mut); font-size: 10px; }
+        .mon-meta { display: block; padding: 6px 8px; }
+        .mon-name { display: block; font-size: 11px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .mon-sub { display: block; font: 400 10px/1.4 ui-monospace, Consolas, monospace; color: var(--mut); }
+        .mon-badge { position: absolute; top: 5px; left: 5px; font: 700 10px/1 ui-monospace, Consolas, monospace; background: rgba(10,11,14,.82); color: var(--ink); border: 1px solid var(--line); padding: 3px 6px; border-radius: 6px; }
+        .mon-flag { position: absolute; top: 5px; right: 5px; font: 700 9px/1 system-ui, sans-serif; background: var(--you); color: #0A0B0E; padding: 3px 6px; border-radius: 6px; letter-spacing: .4px; }
+        .mon-empty { font-size: 12px; color: var(--mut); padding: 8px 0 12px; }
+        .pair-addr { margin: 10px 0 6px; text-align: left; }
+        .pair-addr label { display: block; font-size: 11px; color: var(--mut); font-weight: 600; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 6px; }
+        .pair-row { display: flex; gap: 6px; align-items: stretch; }
+        .pair-row input { flex: 1; min-width: 0; margin-bottom: 0; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
+        .pair-reset { width: auto; flex-shrink: 0; margin: 0; padding: 0 12px; background: #475569; border-radius: 10px; font-size: 14px; }
+        .pair-reset:hover { background: #5b6b80; }
+        .pair-hint { margin-top: 6px; font: 400 10px/1.5 ui-monospace, Consolas, monospace; color: var(--mut); word-break: break-all; }
+        .pair-hint.warn { color: #fbbf24; }
         .room-code { font-family: monospace; font-size: 26px; letter-spacing: 4px; background: #1e2937; padding: 12px 16px; border-radius: 10px; text-align: center; margin: 12px 0; color: #a5b4fc; border: 1.5px solid #334155; }
-        .log-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-        .log { font-size: 11px; background: #0a0f1a; padding: 10px 12px; border-radius: 8px; flex: 1; overflow-y: auto; font-family: monospace; line-height: 1.6; min-height: 80px; scrollbar-width: thin; scrollbar-color: #334155 transparent; }
+        .log-wrap { flex: 0 0 auto; height: 200px; display: flex; flex-direction: column; min-height: 0; }
+        .log { font-size: 11px; background: #0a0f1a; padding: 10px 12px; border-radius: 8px; flex: 1; overflow-y: auto; font-family: monospace; line-height: 1.6; min-height: 0; scrollbar-width: thin; scrollbar-color: #334155 transparent; }
         .log::-webkit-scrollbar { width: 4px; }
         .log::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        .v-resizer { flex: 0 0 auto; height: 11px; margin: 2px -20px 4px; display: flex; align-items: center; justify-content: center; cursor: row-resize; touch-action: none; outline: none; }
+        .v-resizer::before { content: ''; width: 44px; height: 3px; border-radius: 999px; background: #334155; transition: background .15s, width .15s; }
+        .v-resizer:hover::before, .v-resizer.drag::before, .v-resizer:focus-visible::before { background: var(--you); width: 68px; }
         .setting-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px; }
         .setting-row label { font-size: 12px; color: #94a3b8; font-weight: 500; flex-shrink: 0; }
         .setting-row select, .setting-row input[type=range] { margin-bottom: 0; flex: 1; }
@@ -89,7 +117,9 @@
                     </div>
                     <div id="hostMode">
                         <input type="text" id="customRoomCode" placeholder="Optional: Persistent Room Code" style="text-transform:uppercase">
-                        <select id="monitorSelect"></select>
+                        <select id="monitorSelect" style="display:none"></select>
+                        <div class="mon-head"><span>Screen to share</span><button type="button" class="mon-refresh" id="monRefresh" onclick="loadSources(true)">&#8635; Refresh</button></div>
+                        <div class="mon-grid" id="monitorGrid"></div>
                         <button onclick="userClickedHost=true; createAndHost()">&#128640; Start Hosting (Share Screen)</button>
                     </div>
                     <div id="viewerMode" style="display:none;">
@@ -98,6 +128,14 @@
                     </div>
                     <div id="activeSession" style="display:none;">
                         <div class="room-code" id="displayCode">———</div>
+                        <div class="pair-addr">
+                            <label for="pairHost">Pairing address</label>
+                            <div class="pair-row">
+                                <input type="text" id="pairHost" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="detecting…">
+                                <button type="button" class="pair-reset" id="pairReset" title="Reset to the detected LAN address">&#8635;</button>
+                            </div>
+                            <div class="pair-hint" id="pairHint"></div>
+                        </div>
                         <img id="pairQr" alt="Scan to join" style="display:none;width:160px;height:160px;background:#fff;border-radius:8px;padding:6px;margin:8px auto;object-fit:contain">
                         <div class="btn-row">
                             <button class="success" onclick="copyCode()">&#128203; Code</button>
@@ -164,8 +202,10 @@
                     </div>
                 </div>
 
+                <div class="v-resizer" id="panelResizer" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize. Double-click to reset."></div>
+
                 <div class="log-wrap">
-                    <h2 style="margin-top:16px;margin-bottom:8px;">&#128196; Connection Log</h2>
+                    <h2 style="margin-top:4px;margin-bottom:8px;">&#128196; Connection Log</h2>
                     <div id="log" class="log"></div>
                 </div>
             </div>
@@ -632,16 +672,98 @@
             }, 500);
         }
 
+        const MON_REFRESH_MS = 3000;
         let availableSources = [];
         const savedRoom = localStorage.getItem('amni-custom-code');
         if (savedRoom) document.getElementById('customRoomCode').value = savedRoom;
-        window.electronAPI.getSources().then(sources => {
-            availableSources = sources;
-            const select = document.getElementById('monitorSelect');
-            sources.forEach(src => { const opt = document.createElement('option'); opt.value = src.id; opt.textContent = src.name; select.appendChild(opt); });
-            const autoCode = document.getElementById('customRoomCode').value.trim();
-            if (autoCode && sources.length && !isHost) { setMode('host'); createAndHost(); }
-        });
+        let selectedSourceId = null;
+        let sourcesLoadedOnce = false;
+
+        function escHtml(s) {
+            return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        // The hidden <select> stays the single source of truth for createAndHost(),
+        // so the picker below is purely a nicer way to set it.
+        function selectSource(id) {
+            selectedSourceId = id;
+            document.getElementById('monitorSelect').value = id;
+            document.querySelectorAll('#monitorGrid .mon-card').forEach(c => c.classList.toggle('sel', c.dataset.id === id));
+        }
+
+        function renderMonitorGrid() {
+            const grid = document.getElementById('monitorGrid');
+            if (!availableSources.length) {
+                grid.innerHTML = '<div class="mon-empty">No screens detected. Click Refresh.</div>';
+                return;
+            }
+            if (!availableSources.some(s => s.id === selectedSourceId)) selectedSourceId = availableSources[0].id;
+            grid.innerHTML = availableSources.map(s => {
+                const dims = s.width && s.height ? s.width + '\u00d7' + s.height : '';
+                const shot = s.thumbnail ? '<img alt="" src="' + s.thumbnail + '">' : '<div class="mon-none">no preview</div>';
+                return '<button type="button" class="mon-card' + (s.id === selectedSourceId ? ' sel' : '') + '"'
+                    + ' data-id="' + escHtml(s.id) + '" title="' + escHtml(s.name) + '">'
+                    + shot
+                    + '<span class="mon-badge">' + s.index + '</span>'
+                    + (s.primary ? '<span class="mon-flag">MAIN</span>' : '')
+                    + '<span class="mon-meta"><span class="mon-name">' + escHtml(s.name) + '</span>'
+                    + '<span class="mon-sub">' + dims + '</span></span>'
+                    + '</button>';
+            }).join('');
+            grid.querySelectorAll('.mon-card').forEach(c => c.addEventListener('click', () => selectSource(c.dataset.id)));
+            document.getElementById('monitorSelect').value = selectedSourceId;
+        }
+
+        // Swap thumbnail pixels in place when the screen list itself has not changed.
+        // Rebuilding innerHTML every tick would make the previews flicker and drop the selection ring.
+        function refreshThumbs() {
+            document.querySelectorAll('#monitorGrid .mon-card').forEach(card => {
+                const s = availableSources.find(x => x.id === card.dataset.id);
+                const img = card.querySelector('img');
+                if (s && s.thumbnail && img) img.src = s.thumbnail;
+            });
+        }
+
+        function sameScreenSet(a, b) {
+            return a.length === b.length && a.every((s, i) => s.id === b[i].id && s.name === b[i].name);
+        }
+
+        async function loadSources(manual) {
+            const btn = document.getElementById('monRefresh');
+            if (manual && btn) { btn.disabled = true; btn.textContent = '\u2026'; }
+            try {
+                const sources = await window.electronAPI.getSources();
+                const prev = availableSources;
+                availableSources = sources;
+                if (sameScreenSet(prev, sources) && document.querySelector('#monitorGrid .mon-card')) {
+                    refreshThumbs();
+                } else {
+                    const select = document.getElementById('monitorSelect');
+                    select.innerHTML = '';
+                    sources.forEach(s => { const o = document.createElement('option'); o.value = s.id; o.textContent = s.name; select.appendChild(o); });
+                    renderMonitorGrid();
+                    if (manual) log('Found ' + sources.length + ' screen' + (sources.length === 1 ? '' : 's'), 'success');
+                }
+                if (!sourcesLoadedOnce) {
+                    sourcesLoadedOnce = true;
+                    const autoCode = document.getElementById('customRoomCode').value.trim();
+                    if (autoCode && sources.length && !isHost) { setMode('host'); userClickedHost = false; createAndHost(); }
+                }
+            } catch (e) {
+                log('Could not list screens: ' + (e && e.message ? e.message : e), 'error');
+            } finally {
+                if (manual && btn) { btn.disabled = false; btn.innerHTML = '&#8635; Refresh'; }
+            }
+        }
+
+        loadSources(false);
+        // Tick only while the picker is actually on screen and idle. Once hosting starts the host
+        // panel is hidden, so this stops paying for captures nobody is looking at.
+        setInterval(() => {
+            if (document.hidden || isHost || !document.hasFocus()) return;
+            if (document.getElementById('hostMode').style.display === 'none') return;
+            loadSources(false);
+        }, MON_REFRESH_MS);
 
         async function createAndHost() {
             initSocket();
@@ -742,20 +864,82 @@
 
         function copyCode() { navigator.clipboard.writeText(roomId); log('Room code copied'); }
 
-        async function pairUrl() {
-            const ip = await window.electronAPI.getLocalIp();
-            if (ip && ip !== 'localhost') ourLan = ip;
-            return `http://${ip}:3389/viewer?host=${ip}&code=${roomId}`;
+        // The link and QR used to hardcode getLocalIp(), which is always a private LAN
+        // address, so neither could ever work off the network. The address is now yours to
+        // set: LAN IP, Tailscale IP, DDNS name, or a full https:// origin behind a proxy.
+        let detectedIp = '';
+        const PAIR_KEY = 'amni-pair-host';
+
+        // Accepts "1.2.3.4", "host:34389", "https://rd.example.com". Port defaults to 3389
+        // for http so the plain-IP case keeps working, and is left implicit for https so a
+        // reverse proxy on 443 does not get a stray :3389 glued on.
+        function parsePairTarget() {
+            const el = document.getElementById('pairHost');
+            let raw = ((el && el.value) || '').trim() || detectedIp || 'localhost';
+            raw = raw.replace(/\/+$/, '');
+            let proto = 'http';
+            const m = raw.match(/^(https?):\/\/(.+)$/i);
+            if (m) { proto = m[1].toLowerCase(); raw = m[2]; }
+            const pm = raw.match(/^(.+):(\d{1,5})$/);
+            let host = raw, port = '';
+            if (pm) { host = pm[1]; port = pm[2]; }
+            else if (proto === 'http') port = '3389';
+            return { proto, host, port, authority: port ? host + ':' + port : host };
         }
+
+        function isPrivateAddr(h) {
+            return /^(localhost$|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(h);
+        }
+
+        async function pairUrl() {
+            const t = parsePairTarget();
+            return `${t.proto}://${t.authority}/viewer?host=${encodeURIComponent(t.host)}&code=${roomId}`;
+        }
+
         async function paintPairQr() {
             const img = document.getElementById('pairQr');
+            const hint = document.getElementById('pairHint');
             if (!img || !roomId) return;
+            let url = '';
             try {
-                const url = await pairUrl();
+                url = await pairUrl();
+                // The QR itself is always rendered by the local server, whatever the link points at.
                 img.src = 'http://127.0.0.1:3389/qr?url=' + encodeURIComponent(url);
                 img.style.display = 'block';
             } catch (e) { img.style.display = 'none'; }
+            if (hint) {
+                const priv = isPrivateAddr(parsePairTarget().host);
+                hint.textContent = (priv ? 'LAN only \u2022 ' : '') + url;
+                hint.classList.toggle('warn', priv);
+                hint.title = priv ? 'Private address. This link only works on your own network.' : '';
+            }
         }
+
+        function setPairHost(v, persist) {
+            const el = document.getElementById('pairHost');
+            if (!el) return;
+            el.value = v;
+            if (persist) localStorage.setItem(PAIR_KEY, v);
+            paintPairQr();
+        }
+
+        (async function initPairHost() {
+            try { detectedIp = await window.electronAPI.getLocalIp(); } catch (_) { detectedIp = 'localhost'; }
+            const el = document.getElementById('pairHost');
+            if (!el) return;
+            el.placeholder = detectedIp;
+            const saved = (localStorage.getItem(PAIR_KEY) || '').trim();
+            el.value = saved || detectedIp;
+            let debounce = null;
+            el.addEventListener('input', () => {
+                localStorage.setItem(PAIR_KEY, el.value.trim());
+                clearTimeout(debounce);
+                debounce = setTimeout(paintPairQr, 350);
+            });
+            const reset = document.getElementById('pairReset');
+            if (reset) reset.addEventListener('click', () => setPairHost(detectedIp, true));
+            paintPairQr();
+        })();
         async function copyLink() {
             const url = await pairUrl();
             navigator.clipboard.writeText(url);
@@ -818,6 +1002,85 @@
         window.addEventListener('beforeunload', () => { try { window.electronAPI?.stopHwCapture?.(); } catch (e) {} });
         document.getElementById('autoHint').classList.toggle('on', document.getElementById('autoBitrateToggle').checked);
         log('Amni-Connect initialized — End-to-End Encrypted', 'success');
+
+        // Panel splitter. The settings list and the log both carried flex:1, so they hard-split
+        // the panel 50/50 and the log ate half the height while you were still setting up.
+        // The log now owns an explicit height and this handle is what sets it.
+        (function panelSplitter() {
+            const panel = document.querySelector('.panel');
+            const logWrap = document.querySelector('.log-wrap');
+            const bar = document.getElementById('panelResizer');
+            if (!panel || !logWrap || !bar) return;
+            const KEY = 'amni-log-h', DEFAULT_H = 200, MIN_LOG = 52, MIN_SETTINGS = 140;
+            let padBottom = 0;
+
+            // clientHeight still includes the panel's own padding, and the handle carries
+            // vertical margins outside its offsetHeight. Miss either and the settings pane
+            // collapses past MIN_SETTINGS when you drag the handle to the top.
+            function px(v) { return parseFloat(v) || 0; }
+            function contentH() {
+                const cs = getComputedStyle(panel);
+                return panel.clientHeight - px(cs.paddingTop) - px(cs.paddingBottom);
+            }
+            function barOuterH() {
+                const cs = getComputedStyle(bar);
+                return bar.offsetHeight + px(cs.marginTop) + px(cs.marginBottom);
+            }
+            function clamp(h) {
+                const ch = contentH();
+                if (ch <= 0) return Math.round(Math.max(MIN_LOG, h));
+                const room = ch - MIN_SETTINGS - barOuterH();
+                return Math.round(Math.max(MIN_LOG, Math.min(h, Math.max(MIN_LOG, room))));
+            }
+            function currentH() {
+                return parseInt(logWrap.style.height, 10) || logWrap.offsetHeight || DEFAULT_H;
+            }
+            function setH(h, persist) {
+                const v = clamp(h);
+                logWrap.style.height = v + 'px';
+                bar.setAttribute('aria-valuenow', String(v));
+                if (persist) localStorage.setItem(KEY, String(v));
+                return v;
+            }
+
+            const saved = parseInt(localStorage.getItem(KEY), 10);
+            setH(Number.isFinite(saved) ? saved : DEFAULT_H, false);
+
+            let dragging = false;
+            bar.addEventListener('pointerdown', e => {
+                dragging = true;
+                padBottom = parseFloat(getComputedStyle(panel).paddingBottom) || 0;
+                bar.classList.add('drag');
+                document.body.style.userSelect = 'none';
+                try { bar.setPointerCapture(e.pointerId); } catch (_) {}
+                e.preventDefault();
+            });
+            bar.addEventListener('pointermove', e => {
+                if (!dragging) return;
+                setH(panel.getBoundingClientRect().bottom - padBottom - e.clientY, false);
+            });
+            function endDrag(e) {
+                if (!dragging) return;
+                dragging = false;
+                bar.classList.remove('drag');
+                document.body.style.userSelect = '';
+                try { bar.releasePointerCapture(e.pointerId); } catch (_) {}
+                localStorage.setItem(KEY, String(currentH()));
+            }
+            bar.addEventListener('pointerup', endDrag);
+            bar.addEventListener('pointercancel', endDrag);
+            bar.addEventListener('dblclick', () => setH(DEFAULT_H, true));
+            bar.addEventListener('keydown', e => {
+                const step = e.shiftKey ? 48 : 16;
+                if (e.key === 'ArrowUp') setH(currentH() + step, true);
+                else if (e.key === 'ArrowDown') setH(currentH() - step, true);
+                else return;
+                e.preventDefault();
+                e.stopPropagation();
+            });
+            // A shorter window must not leave the log taller than the panel it lives in.
+            window.addEventListener('resize', () => setH(currentH(), false));
+        })();
     </script>
 </body>
 </html>
