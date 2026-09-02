@@ -139,10 +139,6 @@ impl Ctl {
         }
     }
     fn map_rect(&self) -> (i32, i32, i32, i32) {
-        #[cfg(windows)]
-        if let Some(b) = capture::stream_bounds() {
-            return b;
-        }
         (self.bx, self.by, self.bw, self.bh)
     }
     fn shift(&mut self, down: bool, what: &str) {

@@ -30,19 +30,19 @@ button.danger{background:#ef4444}
 #signal-pill{display:none;align-items:center;gap:5px;padding:3px 9px;border-radius:9999px;background:rgba(255,255,255,0.06);font-size:11px;font-weight:600;letter-spacing:0.3px;flex-shrink:0}
 #signal-pill.on{display:inline-flex}
 #signal-dot{width:7px;height:7px;border-radius:50%;background:#64748b}
-#viewer-screen{flex:1;display:none;position:relative;background:#000;overflow:hidden;padding-bottom:var(--toolbar-h)}
-#zoom-container{flex:1 1 auto;min-height:0;width:100%;position:relative;transform-origin:0 0}
+#viewer-screen{flex:1;display:none;position:relative;background:#000;overflow:hidden;min-height:0}
+#zoom-container{position:absolute;top:0;left:0;right:0;bottom:var(--toolbar-h);transform-origin:0 0}
 video,#remote-canvas{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none}
 #remote-canvas{display:none}
 #touch-overlay{position:absolute;inset:0;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none}
-#toolbar{position:fixed;left:0;right:0;bottom:0;display:flex;flex-wrap:nowrap;align-items:stretch;gap:6px;padding:8px 10px;background:rgba(0,0,0,.72);backdrop-filter:blur(8px);z-index:60;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right));padding-bottom:max(8px,env(safe-area-inset-bottom))}
+#toolbar{position:absolute;left:0;right:0;bottom:0;display:flex;flex-wrap:nowrap;align-items:stretch;gap:6px;padding:8px 10px;background:rgba(0,0,0,.72);backdrop-filter:blur(8px);z-index:60;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right));padding-bottom:max(8px,env(safe-area-inset-bottom))}
 #toolbar::-webkit-scrollbar{display:none}
 #toolbar button{width:auto;min-width:52px;flex:0 0 auto;padding:10px 10px;font-size:12px;border-radius:6px;margin:0;white-space:nowrap}
 #toolbar #zoom-out,#toolbar #zoom-in{min-width:44px;padding:10px 8px}
 #toolbar #dc-btn{min-width:40px;padding:10px 12px}
-#keyboard-bar{position:fixed;bottom:var(--toolbar-h);left:0;right:0;display:none;padding:8px;background:rgba(0,0,0,.92);z-index:55;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation;max-height:min(58vh,calc(100dvh - var(--toolbar-h) - 44px));overflow-y:auto;padding-left:max(8px,env(safe-area-inset-left));padding-right:max(8px,env(safe-area-inset-right));padding-bottom:max(8px,env(safe-area-inset-bottom))}
-#clipboard-bar{position:fixed;bottom:var(--toolbar-h);left:0;right:0;display:none;padding:10px;background:rgba(0,0,0,.8);z-index:54;max-height:min(50vh,calc(100dvh - var(--toolbar-h) - 44px));overflow-y:auto;padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right));padding-bottom:max(10px,env(safe-area-inset-bottom))}
-#file-progress{position:fixed;bottom:var(--toolbar-h);left:0;right:0;display:none;padding:10px 14px;background:rgba(0,0,0,.85);z-index:56;padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env(safe-area-inset-right))}
+#keyboard-bar{position:absolute;bottom:var(--toolbar-h);left:0;right:0;display:none;padding:8px;background:rgba(0,0,0,.92);z-index:55;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation;max-height:min(58vh,calc(100% - var(--toolbar-h) - 44px));overflow-y:auto;padding-left:max(8px,env(safe-area-inset-left));padding-right:max(8px,env(safe-area-inset-right));padding-bottom:max(8px,env(safe-area-inset-bottom))}
+#clipboard-bar{position:absolute;bottom:var(--toolbar-h);left:0;right:0;display:none;padding:10px;background:rgba(0,0,0,.8);z-index:54;max-height:min(50vh,calc(100% - var(--toolbar-h) - 44px));overflow-y:auto;padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right));padding-bottom:max(10px,env(safe-area-inset-bottom))}
+#file-progress{position:absolute;bottom:var(--toolbar-h);left:0;right:0;display:none;padding:10px 14px;background:rgba(0,0,0,.85);z-index:56;padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env(safe-area-inset-right))}
 #mode-btn{background:#475569}
 #zoom-btn{background:#3b82f6}
 #kb-btn{background:#334155}
@@ -350,8 +350,7 @@ function connect() {
     roomId = id;
     setStatus(`Joined room ${id} — waiting for stream\u2026`);
     document.getElementById('connect-screen').style.display = 'none';
-    document.getElementById('viewer-screen').style.display = 'flex';
-    document.getElementById('viewer-screen').style.flexDirection = 'column';
+    document.getElementById('viewer-screen').style.display = 'block';
     document.getElementById('toolbar').style.display = 'flex';
     requestAnimationFrame(() => { layoutViewerChrome(); requestAnimationFrame(layoutViewerChrome); });
     createPC();
@@ -549,10 +548,6 @@ const overlay = document.getElementById('touch-overlay');
 let panX = 0, panY = 0, currentZoom = 1;
 let lastSrcSize = { w: 0, h: 0 };
 
-function mediaSurface() {
-  if (hwUsing) return document.getElementById('remote-canvas');
-  return document.getElementById('remote-video');
-}
 function sourceSize() {
   const c = document.getElementById('remote-canvas');
   if (hwUsing && c && c.width) { lastSrcSize = { w: c.width, h: c.height }; return lastSrcSize; }
@@ -567,15 +562,9 @@ function sourceSize() {
   else if (lastSrcSize.w) return lastSrcSize;
   return { w: w || 0, h: h || 0 };
 }
-function layoutPoint(clientX, clientY) {
-  const vv = window.visualViewport;
-  if (!vv || (vv.scale === 1 && !vv.offsetLeft && !vv.offsetTop)) return { x: clientX, y: clientY };
-  return { x: (clientX - vv.offsetLeft) / vv.scale, y: (clientY - vv.offsetTop) / vv.scale };
-}
 function getVideoRect() {
   const { w: vw, h: vh } = sourceSize();
-  const el = mediaSurface() || overlay;
-  const r = el.getBoundingClientRect();
+  const r = overlay.getBoundingClientRect();
   if (!vw || !vh) return { left: r.left, top: r.top, width: r.width, height: r.height };
   const cAR = r.width / r.height, vAR = vw / vh;
   const dW = vAR > cAR ? r.width : r.height * vAR;
@@ -584,11 +573,10 @@ function getVideoRect() {
 }
 
 function screenCoord(clientX, clientY) {
-  const p = layoutPoint(clientX, clientY);
   const vr = getVideoRect();
   return {
-    x: Math.max(0, Math.min(1, (p.x - vr.left) / vr.width)),
-    y: Math.max(0, Math.min(1, (p.y - vr.top)  / vr.height))
+    x: Math.max(0, Math.min(1, (clientX - vr.left) / vr.width)),
+    y: Math.max(0, Math.min(1, (clientY - vr.top)  / vr.height))
   };
 }
 
@@ -1105,6 +1093,9 @@ function layoutViewerChrome() {
 const _tbEl = document.getElementById('toolbar');
 if (_tbEl && typeof ResizeObserver !== 'undefined') new ResizeObserver(layoutViewerChrome).observe(_tbEl);
 window.addEventListener('resize', layoutViewerChrome);
+if (window.visualViewport) window.visualViewport.addEventListener('resize', layoutViewerChrome);
+const _remoteVideo = document.getElementById('remote-video');
+if (_remoteVideo) _remoteVideo.addEventListener('loadedmetadata', () => { lastSrcSize = { w: 0, h: 0 }; sourceSize(); });
 
 function toggleKeyboard() {
   const bar = document.getElementById('keyboard-bar');

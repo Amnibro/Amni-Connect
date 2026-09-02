@@ -50,24 +50,6 @@ fn hub() -> &'static Hub {
     })
 }
 
-pub fn stream_bounds() -> Option<(i32, i32, i32, i32)> {
-    let h = hub();
-    if !h.ready.load(Ordering::Relaxed) {
-        return None;
-    }
-    let w = h.width.load(Ordering::Relaxed) as i32;
-    let ht = h.height.load(Ordering::Relaxed) as i32;
-    if w < 2 || ht < 2 {
-        return None;
-    }
-    Some((
-        h.left.load(Ordering::Relaxed),
-        h.top.load(Ordering::Relaxed),
-        w,
-        ht,
-    ))
-}
-
 fn set_err(msg: impl Into<String>) {
     let m = msg.into();
     eprintln!("[amni-control] capture {m}");

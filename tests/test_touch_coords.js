@@ -3,18 +3,18 @@ const fs = require('fs');
 const path = require('path');
 const src = fs.readFileSync(path.join(__dirname, '..', 'viewer.html'), 'utf8');
 
-const i0 = src.indexOf('function mediaSurface()');
+const i0 = src.indexOf('function sourceSize()');
 const i1 = src.indexOf('function clampPan()', i0);
 if (i0 < 0 || i1 < 0) throw new Error('could not extract coord helpers from viewer.html');
 const body = src.slice(i0, i1);
 
-const css = src.match(/#viewer-screen\{[^}]+\}/);
-if (!css || !css[0].includes('padding-bottom:var(--toolbar-h)')) {
-  console.error('FAIL: #viewer-screen must reserve toolbar height (padding-bottom:var(--toolbar-h))');
+const css = src.match(/#zoom-container\{[^}]+\}/);
+if (!css || !css[0].includes('bottom:var(--toolbar-h)')) {
+  console.error('FAIL: #zoom-container must inset above toolbar (bottom:var(--toolbar-h))');
   process.exit(1);
 }
-if (!src.includes('#zoom-container{flex:1 1 auto;min-height:0;')) {
-  console.error('FAIL: #zoom-container must flex-fill above toolbar');
+if (src.includes('padding-bottom:var(--toolbar-h)') && src.match(/#viewer-screen\{[^}]+\}/)?.[0]?.includes('padding-bottom')) {
+  console.error('FAIL: #viewer-screen must not pad-bottom; zoom-container owns the inset');
   process.exit(1);
 }
 

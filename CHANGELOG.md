@@ -1,5 +1,11 @@
 # Amni-Connect Changelog
 
+## v1.5.13 — touch coords take 2 (2026-09-02)
+
+### Fixed
+- **Taps still landed far from the cursor.** The v1.5.12 padding/flex toolbar inset and `visualViewport` remapping fought the real layout on phone. `#zoom-container` now uses absolute `inset` above the toolbar (in-flow, not `position:fixed` over the video). Touch coords map from `#touch-overlay` directly with no viewport hack.
+- **Host input bounds could disagree with the live stream.** `input-bounds` now uses the actual encode/capture width and height (WebRTC track settings or HW hello) with the picked monitor origin, not a stale DXGI override.
+
 ## v1.5.12 — touch offset fix (2026-09-02)
 
 ### Fixed
