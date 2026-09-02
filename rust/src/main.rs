@@ -23,6 +23,10 @@ struct InputEvent {
     y: Option<f64>,
     dx: Option<f64>,
     dy: Option<f64>,
+    left: Option<f64>,
+    top: Option<f64>,
+    width: Option<f64>,
+    height: Option<f64>,
     key: Option<String>,
     code: Option<String>,
     room_id: Option<String>,
@@ -107,8 +111,10 @@ fn key_from_str(s: &str) -> Option<Key> {
 }
 struct Ctl {
     eng: Enigo,
-    sw: i32,
-    sh: i32,
+    bx: i32,
+    by: i32,
+    bw: i32,
+    bh: i32,
     errs: u32,
     rebuilds: u32,
     misses: u32,
@@ -121,8 +127,23 @@ struct Ctl {
 impl Ctl {
     fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let eng = Enigo::new(&Settings::default())?;
-        let (sw, sh) = eng.main_display().unwrap_or((1920, 1080));
-        Ok(Self { eng, sw, sh, errs: 0, rebuilds: 0, misses: 0, direct: false, last: String::new(), pending: None, shift_held: false, auto_shift: false })
+        let (bw, bh) = eng.main_display().unwrap_or((1920, 1080));
+        Ok(Self { eng, bx: 0, by: 0, bw, bh, errs: 0, rebuilds: 0, misses: 0, direct: false, last: String::new(), pending: None, shift_held: false, auto_shift: false })
+    }
+    fn set_bounds(&mut self, bx: i32, by: i32, bw: i32, bh: i32) {
+        if bw > 1 && bh > 1 {
+            self.bx = bx;
+            self.by = by;
+            self.bw = bw;
+            self.bh = bh;
+        }
+    }
+    fn map_rect(&self) -> (i32, i32, i32, i32) {
+        #[cfg(windows)]
+        if let Some(b) = capture::stream_bounds() {
+            return b;
+        }
+        (self.bx, self.by, self.bw, self.bh)
     }
     fn shift(&mut self, down: bool, what: &str) {
         let r = self.eng.key(Key::Shift, if down { Direction::Press } else { Direction::Release });
@@ -188,11 +209,11 @@ impl Ctl {
         match Enigo::new(&Settings::default()) {
             Ok(e) => {
                 self.eng = e;
-                let (sw, sh) = self.eng.main_display().unwrap_or((self.sw, self.sh));
-                self.sw = sw;
-                self.sh = sh;
+                let (bw, bh) = self.eng.main_display().unwrap_or((self.bw, self.bh));
+                self.bw = bw;
+                self.bh = bh;
                 self.errs = 0;
-                eprintln!("[amni-control] rebuilt enigo #{} display {sw}x{sh}", self.rebuilds);
+                eprintln!("[amni-control] rebuilt enigo #{} display {bw}x{bh}", self.rebuilds);
             }
             Err(e) => {
                 eprintln!("[amni-control] enigo rebuild failed {e:?} - exiting for host respawn");
@@ -201,14 +222,19 @@ impl Ctl {
         }
     }
     fn status(&self) -> String {
+        let (bx, by, bw, bh) = self.map_rect();
         format!(
-            "{{\"type\":\"pong\",\"errs\":{},\"rebuilds\":{},\"misses\":{},\"direct\":{},\"display\":[{},{}],\"last\":{}}}\n",
+            "{{\"type\":\"pong\",\"errs\":{},\"rebuilds\":{},\"misses\":{},\"direct\":{},\"display\":[{},{}],\"bounds\":[{}, {}, {}, {}],\"last\":{}}}\n",
             self.errs,
             self.rebuilds,
             self.misses,
             self.direct,
-            self.sw,
-            self.sh,
+            bw,
+            bh,
+            bx,
+            by,
+            bw,
+            bh,
             serde_json::to_string(&self.last).unwrap_or_else(|_| String::from("\"\""))
         )
     }
@@ -220,11 +246,23 @@ fn apply(c: &mut Ctl, ev: &InputEvent) -> Option<String> {
     if ev.event_type == "ping" {
         return Some(c.status());
     }
-    let (sw, sh) = (c.sw as f64, c.sh as f64);
+    if ev.event_type == "input-bounds" {
+        if let (Some(w), Some(h)) = (ev.width, ev.height) {
+            c.set_bounds(
+                ev.left.unwrap_or(0.0) as i32,
+                ev.top.unwrap_or(0.0) as i32,
+                w as i32,
+                h as i32,
+            );
+        }
+        return None;
+    }
+    let (ox, oy, sw, sh) = c.map_rect();
+    let (sw, sh) = (sw as f64, sh as f64);
     match ev.event_type.as_str() {
         "mouse-move" => {
             if let (Some(x), Some(y)) = (ev.x, ev.y) {
-                c.move_to((x * sw) as i32, (y * sh) as i32);
+                c.move_to(ox + (x * sw) as i32, oy + (y * sh) as i32);
             }
         }
         "mouse-move-rel" => {
@@ -337,7 +375,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ctl = Arc::new(Mutex::new(Ctl::new()?));
     {
         let c = lock_ctl(&ctl);
-        eprintln!("[amni-control] v1.5.7 ready display {}x{}", c.sw, c.sh);
+        eprintln!("[amni-control] v1.5.7 ready display {}x{}", c.bw, c.bh);
     }
     spawn_watchdog(Arc::clone(&ctl));
     #[cfg(windows)]

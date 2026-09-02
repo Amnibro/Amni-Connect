@@ -765,6 +765,17 @@
             loadSources(false);
         }, MON_REFRESH_MS);
 
+        function pushInputBounds(mon) {
+            if (!mon || !mon.width || !mon.height) return;
+            window.electronAPI?.sendInputEvent?.({
+                type: 'input-bounds',
+                left: mon.left || 0,
+                top: mon.top || 0,
+                width: mon.width,
+                height: mon.height
+            });
+        }
+
         async function createAndHost() {
             initSocket();
             const customCode = document.getElementById('customRoomCode').value.trim().toUpperCase();
@@ -821,6 +832,12 @@
                 setStatus('Hosting \u2022 E2EE', '#22c55e');
                 setLiveSettings(true);
                 log(`Room ${roomId} created — sharing: ${src.name}`, 'success');
+                pushInputBounds(src);
+                const vt = localStream?.getVideoTracks?.()?.[0];
+                const ts = vt?.getSettings?.();
+                if (ts?.width && ts?.height) {
+                    pushInputBounds({ left: src.left || 0, top: src.top || 0, width: ts.width, height: ts.height });
+                }
                 if (userClickedHost && document.getElementById('trayToggle').checked && window.electronAPI?.hideToTray) {
                     const hid = await window.electronAPI.hideToTray('Hosting ' + roomId);
                     if (hid && hid.status === 'hidden') log('Hosting in tray — click the Amni-Connect icon to show the window');

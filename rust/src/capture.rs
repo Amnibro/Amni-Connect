@@ -1,6 +1,6 @@
 use crate::wire;
 use serde_json::json;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{mpsc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
@@ -24,6 +24,8 @@ struct Hub {
     hw: AtomicBool,
     width: AtomicU32,
     height: AtomicU32,
+    left: AtomicI32,
+    top: AtomicI32,
 }
 
 static HUB: OnceLock<Hub> = OnceLock::new();
@@ -43,7 +45,27 @@ fn hub() -> &'static Hub {
         hw: AtomicBool::new(false),
         width: AtomicU32::new(0),
         height: AtomicU32::new(0),
+        left: AtomicI32::new(0),
+        top: AtomicI32::new(0),
     })
+}
+
+pub fn stream_bounds() -> Option<(i32, i32, i32, i32)> {
+    let h = hub();
+    if !h.ready.load(Ordering::Relaxed) {
+        return None;
+    }
+    let w = h.width.load(Ordering::Relaxed) as i32;
+    let ht = h.height.load(Ordering::Relaxed) as i32;
+    if w < 2 || ht < 2 {
+        return None;
+    }
+    Some((
+        h.left.load(Ordering::Relaxed),
+        h.top.load(Ordering::Relaxed),
+        w,
+        ht,
+    ))
 }
 
 fn set_err(msg: impl Into<String>) {
@@ -243,6 +265,9 @@ mod win {
                 h = 1080;
             }
             let (w, h) = wire::even_size(w, h);
+            hub().left
+                .store(desc.DesktopCoordinates.left, Ordering::Relaxed);
+            hub().top.store(desc.DesktopCoordinates.top, Ordering::Relaxed);
             hub().width.store(w, Ordering::Relaxed);
             hub().height.store(h, Ordering::Relaxed);
 

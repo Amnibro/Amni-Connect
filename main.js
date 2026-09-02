@@ -348,6 +348,8 @@ ipcMain.handle('get-sources', async () => {
         primary: !!d && String(d.id) === primaryId,
         width: d ? Math.round(d.bounds.width * d.scaleFactor) : null,
         height: d ? Math.round(d.bounds.height * d.scaleFactor) : null,
+        left: d ? Math.round(d.bounds.x * d.scaleFactor) : null,
+        top: d ? Math.round(d.bounds.y * d.scaleFactor) : null,
         thumbnail: empty ? null : 'data:image/jpeg;base64,' + s.thumbnail.toJPEG(70).toString('base64')
       };
     });

@@ -1,5 +1,11 @@
 # Amni-Connect Changelog
 
+## v1.5.12 — touch offset fix (2026-09-02)
+
+### Fixed
+- **Mobile touch taps landed off vertically and horizontally.** The viewer toolbar fix left the touch layer full-bleed behind the bottom bar, so Y coords included toolbar padding. Ultrawide streams also pillarbox on wide viewports; taps on the picture were mapped across the full overlay including side bars. Viewer now reserves `--toolbar-h`, letterboxes against the real media aspect ratio, and caches stream dimensions.
+- **Host mapped clicks to the wrong monitor / resolution.** `amni-control` always scaled 0–1 to the primary display at `(0,0)`. Sharing an ultrawide or secondary monitor sent the cursor to the wrong place on X and Y. Host now pushes `input-bounds` (monitor origin + size) on session start; HW DXGI capture sets the same bounds automatically.
+
 ## v1.5.11 — Linux AppImage / .deb / .rpm (2026-09-02)
 
 ### Added

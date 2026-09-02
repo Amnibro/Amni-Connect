@@ -30,8 +30,8 @@ button.danger{background:#ef4444}
 #signal-pill{display:none;align-items:center;gap:5px;padding:3px 9px;border-radius:9999px;background:rgba(255,255,255,0.06);font-size:11px;font-weight:600;letter-spacing:0.3px;flex-shrink:0}
 #signal-pill.on{display:inline-flex}
 #signal-dot{width:7px;height:7px;border-radius:50%;background:#64748b}
-#viewer-screen{flex:1;display:none;position:relative;background:#000;overflow:hidden}
-#zoom-container{width:100%;height:100%;position:relative;transform-origin:0 0}
+#viewer-screen{flex:1;display:none;position:relative;background:#000;overflow:hidden;padding-bottom:var(--toolbar-h)}
+#zoom-container{flex:1 1 auto;min-height:0;width:100%;position:relative;transform-origin:0 0}
 video,#remote-canvas{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none}
 #remote-canvas{display:none}
 #touch-overlay{position:absolute;inset:0;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none}
@@ -547,16 +547,35 @@ function setDragMode(on) {
 // ── View state ───────────────────────────────────────────────────────────────
 const overlay = document.getElementById('touch-overlay');
 let panX = 0, panY = 0, currentZoom = 1;
+let lastSrcSize = { w: 0, h: 0 };
 
+function mediaSurface() {
+  if (hwUsing) return document.getElementById('remote-canvas');
+  return document.getElementById('remote-video');
+}
 function sourceSize() {
   const c = document.getElementById('remote-canvas');
-  if (hwUsing && c && c.width) return { w: c.width, h: c.height };
+  if (hwUsing && c && c.width) { lastSrcSize = { w: c.width, h: c.height }; return lastSrcSize; }
   const v = document.getElementById('remote-video');
-  return { w: v.videoWidth, h: v.videoHeight };
+  let w = v.videoWidth, h = v.videoHeight;
+  if ((!w || !h) && pc) {
+    const t = pc.getReceivers().map(r => r.track).find(t => t && t.kind === 'video');
+    const s = t && t.getSettings && t.getSettings();
+    if (s && s.width && s.height) { w = s.width; h = s.height; }
+  }
+  if (w && h) lastSrcSize = { w, h };
+  else if (lastSrcSize.w) return lastSrcSize;
+  return { w: w || 0, h: h || 0 };
+}
+function layoutPoint(clientX, clientY) {
+  const vv = window.visualViewport;
+  if (!vv || (vv.scale === 1 && !vv.offsetLeft && !vv.offsetTop)) return { x: clientX, y: clientY };
+  return { x: (clientX - vv.offsetLeft) / vv.scale, y: (clientY - vv.offsetTop) / vv.scale };
 }
 function getVideoRect() {
   const { w: vw, h: vh } = sourceSize();
-  const r = overlay.getBoundingClientRect();
+  const el = mediaSurface() || overlay;
+  const r = el.getBoundingClientRect();
   if (!vw || !vh) return { left: r.left, top: r.top, width: r.width, height: r.height };
   const cAR = r.width / r.height, vAR = vw / vh;
   const dW = vAR > cAR ? r.width : r.height * vAR;
@@ -565,10 +584,11 @@ function getVideoRect() {
 }
 
 function screenCoord(clientX, clientY) {
+  const p = layoutPoint(clientX, clientY);
   const vr = getVideoRect();
   return {
-    x: Math.max(0, Math.min(1, (clientX - vr.left) / vr.width)),
-    y: Math.max(0, Math.min(1, (clientY - vr.top)  / vr.height))
+    x: Math.max(0, Math.min(1, (p.x - vr.left) / vr.width)),
+    y: Math.max(0, Math.min(1, (p.y - vr.top)  / vr.height))
   };
 }
 
@@ -599,7 +619,7 @@ function maxZoom() {
   return !src.w || !base ? 8 : Math.min(ZOOM_HARD_MAX, Math.max(4, src.w / base * ZOOM_PX_PER_SRC));
 }
 function setZoom(next, clientX, clientY) {
-  const prev = currentZoom, r = document.getElementById('viewer-screen').getBoundingClientRect();
+  const prev = currentZoom, r = document.getElementById('zoom-container').getBoundingClientRect();
   currentZoom = Math.max(ZOOM_MIN, Math.min(maxZoom(), next));
   if (currentZoom === prev) return false;
   const k = currentZoom / prev, ax = clientX - r.left, ay = clientY - r.top;
@@ -609,7 +629,7 @@ function setZoom(next, clientX, clientY) {
   return true;
 }
 function zoom(factor) {
-  const r = document.getElementById('viewer-screen').getBoundingClientRect();
+  const r = document.getElementById('zoom-container').getBoundingClientRect();
   setZoom(currentZoom * factor, r.left + r.width / 2, r.top + r.height / 2) &&
     (applyTransform(false), showToast(`${currentZoom.toFixed(currentZoom < 10 ? 1 : 0)}×`));
 }
