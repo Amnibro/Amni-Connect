@@ -10,7 +10,8 @@ const { v4: uuidv4 } = require('uuid');
 
 const PORT = process.env.PORT || 3389;
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS === '*' ? '*' : (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim());
-const INBOX_DIR = process.env.INBOX_DIR || path.join(__dirname, 'received-files');
+const DATA_ROOT = process.env.APPDATA ? path.join(process.env.APPDATA, 'amni-connect') : __dirname;
+const INBOX_DIR = process.env.INBOX_DIR || path.join(DATA_ROOT, 'received-files');
 fs.mkdirSync(INBOX_DIR, { recursive: true });
 
 const app = express();

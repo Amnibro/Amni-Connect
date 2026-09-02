@@ -9,7 +9,7 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{touch-action:manipulation}
-:root{--paper:#0A0B0E;--surface:#161a22;--sunk:#1c212b;--ink:#eef1f6;--mut:#9aa3b2;--line:#2a3140;--you:#A88FE8;--you-ink:#0b0d12}
+:root{--paper:#0A0B0E;--surface:#161a22;--sunk:#1c212b;--ink:#eef1f6;--mut:#9aa3b2;--line:#2a3140;--you:#A88FE8;--you-ink:#0b0d12;--toolbar-h:56px}
 body{background:var(--paper);color:var(--ink);font-family:system-ui,Segoe UI,sans-serif;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
 #connect-screen{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;gap:16px}
 .logo{font-size:20px;font-weight:700;color:var(--you);margin-bottom:8px;letter-spacing:-.02em}
@@ -35,13 +35,18 @@ button.danger{background:#ef4444}
 video,#remote-canvas{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none}
 #remote-canvas{display:none}
 #touch-overlay{position:absolute;inset:0;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none}
-#toolbar{position:fixed;left:0;right:0;bottom:0;display:flex;flex-wrap:wrap;gap:4px;padding:8px;background:rgba(0,0,0,.72);backdrop-filter:blur(8px);z-index:60;padding-left:max(8px,env(safe-area-inset-left));padding-right:max(8px,env(safe-area-inset-right));padding-bottom:max(8px,env(safe-area-inset-bottom))}
-#toolbar button{width:auto;min-width:0;flex:1 1 18%;padding:8px 4px;font-size:11px;border-radius:6px;margin:0;white-space:nowrap}
+#toolbar{position:fixed;left:0;right:0;bottom:0;display:flex;flex-wrap:nowrap;align-items:stretch;gap:6px;padding:8px 10px;background:rgba(0,0,0,.72);backdrop-filter:blur(8px);z-index:60;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right));padding-bottom:max(8px,env(safe-area-inset-bottom))}
+#toolbar::-webkit-scrollbar{display:none}
+#toolbar button{width:auto;min-width:52px;flex:0 0 auto;padding:10px 10px;font-size:12px;border-radius:6px;margin:0;white-space:nowrap}
+#toolbar #zoom-out,#toolbar #zoom-in{min-width:44px;padding:10px 8px}
+#toolbar #dc-btn{min-width:40px;padding:10px 12px}
+#keyboard-bar{position:fixed;bottom:var(--toolbar-h);left:0;right:0;display:none;padding:8px;background:rgba(0,0,0,.92);z-index:55;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation;max-height:min(58vh,calc(100dvh - var(--toolbar-h) - 44px));overflow-y:auto;padding-left:max(8px,env(safe-area-inset-left));padding-right:max(8px,env(safe-area-inset-right));padding-bottom:max(8px,env(safe-area-inset-bottom))}
+#clipboard-bar{position:fixed;bottom:var(--toolbar-h);left:0;right:0;display:none;padding:10px;background:rgba(0,0,0,.8);z-index:54;max-height:min(50vh,calc(100dvh - var(--toolbar-h) - 44px));overflow-y:auto;padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right));padding-bottom:max(10px,env(safe-area-inset-bottom))}
+#file-progress{position:fixed;bottom:var(--toolbar-h);left:0;right:0;display:none;padding:10px 14px;background:rgba(0,0,0,.85);z-index:56;padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env(safe-area-inset-right))}
 #mode-btn{background:#475569}
 #zoom-btn{background:#3b82f6}
 #kb-btn{background:#334155}
 #dc-btn{background:#ef4444}
-#keyboard-bar{position:fixed;bottom:52px;left:0;right:0;display:none;padding:8px;background:rgba(0,0,0,.92);z-index:55;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation;padding-left:max(8px,env(safe-area-inset-left));padding-right:max(8px,env(safe-area-inset-right));padding-bottom:max(8px,env(safe-area-inset-bottom))}
 #keyboard-bar button{touch-action:manipulation}
 #kb-display{display:flex;gap:6px;margin-bottom:6px;align-items:center}
 #kb-text{flex:1;background:#1e2937;border:2px solid #475569;border-radius:8px;color:#fff;font-size:15px;padding:10px 12px;min-height:38px;max-height:72px;overflow-y:auto;font-family:monospace;word-break:break-all;white-space:pre-wrap;line-height:1.3}
@@ -113,7 +118,7 @@ video,#remote-canvas{width:100%;height:100%;object-fit:contain;display:block;poi
     </div>
     <div id="kb-keys"></div>
   </div>
-  <div id="clipboard-bar" style="position:fixed;bottom:52px;left:0;right:0;display:none;padding:10px;background:rgba(0,0,0,.8);z-index:54;padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right));padding-bottom:max(10px,env(safe-area-inset-bottom));">
+  <div id="clipboard-bar">
     <div style="display:flex;flex-direction:column;gap:8px">
       <div style="display:flex;justify-content:space-between;color:#e2e8f0;font-size:12px;font-weight:600">
         <span>Clipboard Sync</span>
@@ -123,7 +128,7 @@ video,#remote-canvas{width:100%;height:100%;object-fit:contain;display:block;poi
       <button onclick="sendClipboard(true)" style="padding:10px;background:#22c55e">Paste to PC</button>
     </div>
   </div>
-  <div id="file-progress" style="position:fixed;bottom:52px;left:0;right:0;display:none;padding:10px 14px;background:rgba(0,0,0,.85);z-index:56;padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env(safe-area-inset-right))">
+  <div id="file-progress">
     <div style="display:flex;justify-content:space-between;font-size:12px;color:#e2e8f0;margin-bottom:6px"><span id="file-progress-name">Sending&hellip;</span><span id="file-progress-pct">0%</span></div>
     <div style="background:#334155;border-radius:6px;height:8px;overflow:hidden"><div id="file-progress-bar" style="background:#22c55e;height:100%;width:0%;transition:width .1s"></div></div>
   </div>
@@ -344,6 +349,7 @@ function connect() {
     document.getElementById('viewer-screen').style.display = 'flex';
     document.getElementById('viewer-screen').style.flexDirection = 'column';
     document.getElementById('toolbar').style.display = 'flex';
+    requestAnimationFrame(() => { layoutViewerChrome(); requestAnimationFrame(layoutViewerChrome); });
     createPC();
   });
   socket.on('error', (msg) => setStatus(`Error: ${msg}`));
@@ -1067,16 +1073,35 @@ document.querySelectorAll('#kb-mods .mod-btn').forEach(btn => {
 const kbClearBtn = document.querySelector('.kb-clear-btn');
 if (kbClearBtn) { kbClearBtn.onclick = null; bindPress(kbClearBtn, clearKb); }
 
+function layoutViewerChrome() {
+  const tb = document.getElementById('toolbar');
+  if (!tb || getComputedStyle(tb).display === 'none') return;
+  document.documentElement.style.setProperty('--toolbar-h', Math.ceil(tb.getBoundingClientRect().height) + 'px');
+}
+const _tbEl = document.getElementById('toolbar');
+if (_tbEl && typeof ResizeObserver !== 'undefined') new ResizeObserver(layoutViewerChrome).observe(_tbEl);
+window.addEventListener('resize', layoutViewerChrome);
+
 function toggleKeyboard() {
   const bar = document.getElementById('keyboard-bar');
   const visible = bar.style.display === 'block';
   bar.style.display = visible ? 'none' : 'block';
-  if (!visible) { renderKbKeys(); renderKbText(); renderKbMods(); }
+  if (!visible) {
+    document.getElementById('clipboard-bar').style.display = 'none';
+    renderKbKeys(); renderKbText(); renderKbMods();
+    layoutViewerChrome();
+    requestAnimationFrame(layoutViewerChrome);
+  }
 }
 
 function toggleClipboard() {
   const bar = document.getElementById('clipboard-bar');
-  bar.style.display = bar.style.display === 'block' ? 'none' : 'block';
+  const visible = bar.style.display === 'block';
+  bar.style.display = visible ? 'none' : 'block';
+  if (!visible) {
+    document.getElementById('keyboard-bar').style.display = 'none';
+    layoutViewerChrome();
+  }
 }
 
 function sendPaste(text) {

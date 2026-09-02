@@ -300,7 +300,8 @@ app.whenReady().then(() => {
   ensureElevatedTask();
   spawnRust();
   createWindow();
-  signalingServer = require('./server');
+  try { signalingServer = require('./server'); }
+  catch (e) { console.error('[amni-connect] signaling failed', e); hostStatus('Signaling failed to start: ' + (e && e.message)); }
   startAutoUpdate();
   app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow());
 });

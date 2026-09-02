@@ -1,5 +1,13 @@
 # Amni-Connect Changelog
 
+## v1.5.10 — viewer toolbar + keyboard layout (2026-09-01)
+
+### Fixed
+- **Mobile viewer toolbar was mushed.** Ten buttons wrapped into a cramped two-row grid. Toolbar is now a single horizontal scroll row with proper tap targets.
+- **On-screen keyboard hid under the bottom bar.** Keyboard and clip sheet used a fixed 52px offset while the toolbar was taller. They now sit on the measured toolbar height (`--toolbar-h`).
+- **Packaged host signaling could fail to start.** Missing `multer` dependency and writing `received-files` inside `app.asar` prevented `:3389` from binding. Inbox now lives under `%APPDATA%\amni-connect\received-files`.
+- **Elevated task broke on `Program Files` paths.** Installer/register script now quotes the daemon path so `AmniControlElevated` runs the packed `amni-control.exe`.
+
 ## v1.5.9 — tap lag, paste, voice, Setup.exe (2026-09-01)
 
 ### Fixed
@@ -13,6 +21,7 @@
 
 ### Notes
 - The running elevated daemon still locks `rust/target/release/amni-control.exe`. Dist copies a freshly built binary from `build/amni-control.exe`. After install, restart the PC or `schtasks /run /tn AmniControlElevated` so input uses the new High-IL process.
+- Packaged host needs `multer` in dependencies and a writable inbox (`%APPDATA%\amni-connect\received-files`). Writing `received-files` next to `server.js` throws inside `app.asar` and signaling never binds :3389. `AmniControlElevated` `/tr` must be a single Command — an unquoted `Program Files` path becomes `C:\Program` + args.
 
 ## v1.5.8 — no silent downscale, tray host (2026-08-30)
 

@@ -10,7 +10,7 @@
 
 Windows installer (default): **[Releases → latest](https://github.com/Amnibro/Amni-Connect/releases/latest)**
 
-Direct file: [Amni-Connect-Setup-1.5.9.exe](https://github.com/Amnibro/Amni-Connect/releases/latest/download/Amni-Connect-Setup-1.5.9.exe)
+Direct file: [Amni-Connect-Setup-1.5.10.exe](https://github.com/Amnibro/Amni-Connect/releases/latest/download/Amni-Connect-Setup-1.5.10.exe)
 
 Run the Setup exe. Allow UAC. If SmartScreen appears: **More info → Run anyway**. No npm, cargo, or schtasks. Packaged hosts pull later versions from the same Releases page.
 
