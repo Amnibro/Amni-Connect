@@ -39,6 +39,11 @@ ok('paste is ctrl+v', chord.length === 4 && chord[0].key === 'Control' && chord[
 ok('viewer paste+voice', vh.includes('function pasteToPc') && vh.includes('function toggleVoice') && vh.includes('type: \'paste\''));
 ok('setup exe', require('fs').readFileSync(require('path').join(__dirname, '..', 'package.json'), 'utf8').includes('Amni-Connect-Setup') && mj.includes('function rustBinPath'));
 ok('github publish', require('fs').readFileSync(require('path').join(__dirname, '..', 'package.json'), 'utf8').includes('"provider": "github"') && mj.includes('electron-updater'));
+ok('linux packages', (() => {
+  const pj = require('fs').readFileSync(require('path').join(__dirname, '..', 'package.json'), 'utf8');
+  return pj.includes('AppImage') && pj.includes('"deb"') && pj.includes('"rpm"') && pj.includes('build/amni-control') && require('fs').existsSync(require('path').join(__dirname, '..', 'scripts', 'install-linux.sh'));
+})());
+ok('linux install script', require('fs').readFileSync(require('path').join(__dirname, '..', 'scripts', 'install-linux.sh'), 'utf8').includes('--deb') && require('fs').readFileSync(require('path').join(__dirname, '..', 'scripts', 'install-linux.sh'), 'utf8').includes('AppImage'));
 ok('default source', /id="resolutionSelect"[\s\S]*value="source" selected/.test(ih));
 ok('default 60fps', /id="fpsSelect"[\s\S]*value="60" selected/.test(ih));
 ok('default 12mbps', ih.includes('value="12000"') && ih.includes('WAN_DEFAULT_KBPS = 12000'));

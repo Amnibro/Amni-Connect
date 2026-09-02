@@ -1,5 +1,15 @@
 # Amni-Connect Changelog
 
+## v1.5.11 — Linux AppImage / .deb / .rpm (2026-09-02)
+
+### Added
+- **Linux packages on GitHub Releases.** AppImage (any distro), `.deb` (Debian/Ubuntu/Mint/Pop), `.rpm` (Fedora/RHEL/openSUSE). Each ships the Linux `amni-control` daemon next to the app — no npm or cargo.
+- **One-liner install:** `curl -fsSL https://raw.githubusercontent.com/Amnibro/Amni-Connect/main/scripts/install-linux.sh | bash` (AppImage). Pass `--deb` or `--rpm` for packaged installs.
+- **CI builds Windows + Linux** from `.github/workflows/release.yml` and uploads both to the same release tag.
+
+### Changed
+- `extraResources` is per-platform so Windows gets `amni-control.exe` and Linux/macOS get `amni-control`. `.deb` / `.rpm` declare `libxdo` / `libxkbcommon` / `libxtst` for enigo input.
+
 ## v1.5.10 — viewer toolbar, PR #1 host UX (2026-09-01)
 
 ### Fixed

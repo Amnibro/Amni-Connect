@@ -1,11 +1,25 @@
 name: release
 on:
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: 'Platforms to build'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - windows
+          - linux
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: write
 jobs:
   windows:
+    if: github.event_name == 'push' || inputs.platforms == 'all' || inputs.platforms == 'windows'
     runs-on: windows-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -17,26 +31,110 @@ jobs:
       - shell: pwsh
         run: |
           New-Item -ItemType Directory -Force build | Out-Null
-          Copy-Item rust/target/release/amni-control.exe build/amni-control.exe
+          Copy-Item rust/target/release/amni-control.exe build/amni-control.exe -Force
       - run: npm ci
       - run: npm run dist
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/Amni-Connect-Setup-*.exe
+            dist/Amni-Connect-Setup-*.exe.blockmap
+            dist/latest.yml
+
+  linux:
+    if: github.event_name == 'push' || inputs.platforms == 'all' || inputs.platforms == 'linux'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config \
+            libxdo-dev libxkbcommon-dev libxtst-dev \
+            libgtk-3-0 libnss3 libxss1 libasound2 \
+            rpm fakeroot
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: cargo build --release --manifest-path rust/Cargo.toml
+      - run: |
+          mkdir -p build
+          cp rust/target/release/amni-control build/amni-control
+          chmod +x build/amni-control
+      - run: npm ci
+      - run: npm run dist:linux
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            dist/Amni-Connect-*.AppImage
+            dist/Amni-Connect-*.deb
+            dist/Amni-Connect-*.rpm
+            dist/latest-linux.yml
+
+  publish:
+    needs: [windows, linux]
+    if: always() && (needs.windows.result == 'success' || needs.linux.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: pwsh
         run: |
-          $ver = (Get-Content package.json | ConvertFrom-Json).version
-          $tag = "v$ver"
-          $files = @(
-            (Get-Item dist/Amni-Connect-Setup-*.exe).FullName,
-            (Get-Item dist/latest.yml).FullName,
-            (Get-Item dist/*.blockmap).FullName
+          set -euo pipefail
+          ver=$(node -p "require('./package.json').version")
+          tag="v$ver"
+          mapfile -t files < <(find artifacts -type f \( \
+            -name 'Amni-Connect-Setup-*.exe' -o \
+            -name 'Amni-Connect-Setup-*.blockmap' -o \
+            -name 'Amni-Connect-*.AppImage' -o \
+            -name 'Amni-Connect-*.deb' -o \
+            -name 'Amni-Connect-*.rpm' -o \
+            -name 'latest.yml' -o \
+            -name 'latest-linux.yml' \
+          \) | sort)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No artifacts to publish" >&2
+            exit 1
+          fi
+          notes=$(cat <<EOF
+          ## Download
+
+          **Windows:** [Amni-Connect-Setup-${ver}.exe](https://github.com/Amnibro/Amni-Connect/releases/download/${tag}/Amni-Connect-Setup-${ver}.exe)
+
+          **Linux (pick one):**
+          - [AppImage](https://github.com/Amnibro/Amni-Connect/releases/download/${tag}/Amni-Connect-${ver}.AppImage) — most distros, chmod +x then run
+          - [.deb](https://github.com/Amnibro/Amni-Connect/releases/download/${tag}/Amni-Connect-${ver}.deb) — Debian / Ubuntu / Mint / Pop!_OS
+          - [.rpm](https://github.com/Amnibro/Amni-Connect/releases/download/${tag}/Amni-Connect-${ver}.rpm) — Fedora / RHEL / openSUSE
+
+          One-liner (AppImage):
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/Amnibro/Amni-Connect/main/scripts/install-linux.sh | bash
+          \`\`\`
+
+          Viewer stays in any browser. Packaged hosts update from this Releases feed.
+          EOF
           )
-          gh release view $tag 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag @files --clobber
-          } else {
-            gh release create $tag @files --title $tag --notes "Amni-Connect $tag — download Amni-Connect-Setup from this release."
-          }
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${files[@]}" --clobber
+            gh release edit "$tag" --notes "$notes"
+          else
+            gh release create "$tag" "${files[@]}" --title "$tag" --notes "$notes"
+          fi

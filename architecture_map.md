@@ -1,5 +1,10 @@
 # Amni-Connect Architecture Map
 
+## 2026-09-02 v1.5.11 Linux packages ship like Windows Setup
+- `package.json` `win.extraResources` / `linux.extraResources` / `mac.extraResources` each pack the matching `amni-control` binary from `build/`.
+- Linux targets: AppImage + deb + rpm. Artifact names `Amni-Connect-${version}.{AppImage,deb,rpm}`. `.deb` depends include `libxdo3|libxdo4`, `libxkbcommon0`, `libxtst6`.
+- CI `.github/workflows/release.yml` builds Windows (NSIS) and Linux on tag/`workflow_dispatch`, then publishes one GitHub Release with both. `scripts/install-linux.sh` is the curl|bash path (AppImage default; `--deb` / `--rpm`).
+
 ## 2026-09-01 v1.5.9 input must not share a clogged pipe with 16 Mbps video
 - Three data channels: `input` (ordered, priority high), `clipboard` (ordered), `screen` (unordered, maxRetransmits 0, priority low). Viewer `sendInput` / `sendPaste` prefer `input`. Host applies `{type:'paste',text}` as writeClipboard + Ctrl+V chord.
 - Renderer→main input is `ipcRenderer.send`, not invoke. HW video IPC drops non-keyframes while `hwPending`.

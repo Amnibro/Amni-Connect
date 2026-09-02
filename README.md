@@ -8,11 +8,22 @@
 
 ## Download
 
-Windows installer (default): **[Releases → latest](https://github.com/Amnibro/Amni-Connect/releases/latest)**
+**[Releases → latest](https://github.com/Amnibro/Amni-Connect/releases/latest)**
 
-Direct file: [Amni-Connect-Setup-1.5.10.exe](https://github.com/Amnibro/Amni-Connect/releases/latest/download/Amni-Connect-Setup-1.5.10.exe)
+| Platform | Install |
+| --- | --- |
+| **Windows** | [Amni-Connect-Setup-1.5.11.exe](https://github.com/Amnibro/Amni-Connect/releases/latest/download/Amni-Connect-Setup-1.5.11.exe) — run it, allow UAC. If SmartScreen: **More info → Run anyway**. |
+| **Linux (AppImage)** | [Amni-Connect-1.5.11.AppImage](https://github.com/Amnibro/Amni-Connect/releases/latest/download/Amni-Connect-1.5.11.AppImage) — `chmod +x` then run. Works on most distros. |
+| **Debian / Ubuntu / Mint** | [Amni-Connect-1.5.11.deb](https://github.com/Amnibro/Amni-Connect/releases/latest/download/Amni-Connect-1.5.11.deb) — `sudo apt install ./Amni-Connect-1.5.11.deb` |
+| **Fedora / RHEL / openSUSE** | [Amni-Connect-1.5.11.rpm](https://github.com/Amnibro/Amni-Connect/releases/latest/download/Amni-Connect-1.5.11.rpm) — `sudo dnf install ./Amni-Connect-1.5.11.rpm` |
 
-Run the Setup exe. Allow UAC. If SmartScreen appears: **More info → Run anyway**. No npm, cargo, or schtasks. Packaged hosts pull later versions from the same Releases page.
+Linux one-liner (downloads the AppImage into `~/.local/bin` and adds a desktop entry):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Amnibro/Amni-Connect/main/scripts/install-linux.sh | bash
+```
+
+Use `| bash -s -- --deb` or `| bash -s -- --rpm` for distro packages instead. No npm or cargo. The viewer is still any browser on phone/tablet.
 
 ### Architecture
 - **Electron** — Cross-platform desktop app (Windows, macOS, Linux)
@@ -58,7 +69,19 @@ Amni-Connect/
 
 ### Linux setup notes
 
-Install system deps before `cargo build` so `enigo` can drive X11/Wayland input:
+**Packaged installs** (AppImage / .deb / .rpm) already include `amni-control`. Runtime libs for input:
+
+```bash
+# Debian / Ubuntu / Mint (also pulled by the .deb)
+sudo apt install libxdo3 libxkbcommon0 libxtst6
+
+# Fedora
+sudo dnf install libxdo libxkbcommon libXtst
+```
+
+AppImage needs FUSE (`libfuse2` on Ubuntu 22+, or use `--appimage-extract-and-run`). Wayland: screen capture goes through PipeWire (Electron flags in `main.js`); the desktop portal asks which screen to share on first host.
+
+**Building from source** still needs the `-dev` packages before `cargo build`:
 
 ```bash
 # Debian / Ubuntu
@@ -67,8 +90,6 @@ sudo apt install libxdo-dev libxkbcommon-dev libxtst-dev pkg-config
 # Fedora
 sudo dnf install libxdo-devel libxkbcommon-devel libXtst-devel
 ```
-
-Wayland users: screen capture goes through PipeWire automatically (the Electron flags are wired in `main.js`). On first launch the desktop portal will ask you to pick a window/monitor.
 
 ### Usage
 - Click **"Start Hosting (Share Screen)"** on the machine you want to control.

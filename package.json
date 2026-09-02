@@ -1,6 +1,6 @@
 {
   "name": "amni-connect",
-  "version": "1.5.10",
+  "version": "1.5.11",
   "description": "End-to-end encrypted Rust + Electron remote desktop",
   "main": "main.js",
   "scripts": {
@@ -8,7 +8,10 @@
     "icon": "node scripts/make-icon.js",
     "build": "node scripts/make-icon.js && electron-builder",
     "dist": "node scripts/make-icon.js && electron-builder --win nsis",
+    "dist:linux": "node scripts/make-icon.js && electron-builder --linux AppImage deb rpm",
+    "dist:all": "node scripts/make-icon.js && electron-builder --win nsis --linux AppImage deb rpm",
     "release": "node scripts/make-icon.js && electron-builder --win nsis --publish always",
+    "release:linux": "node scripts/make-icon.js && electron-builder --linux AppImage deb rpm --publish always",
     "dev": "nodemon server.js",
     "server": "node server.js"
   },
@@ -30,6 +33,7 @@
   "build": {
     "appId": "com.amni.connect",
     "productName": "Amni-Connect",
+    "executableName": "amni-connect",
     "directories": {
       "buildResources": "assets"
     },
@@ -39,17 +43,18 @@
       "!backups/**",
       "!docs/**",
       "!dist/**",
-      "!build/*.exe"
-    ],
-    "extraResources": [
-      {
-        "from": "build/amni-control.exe",
-        "to": "amni-control.exe"
-      }
+      "!build/*.exe",
+      "!build/amni-control"
     ],
     "win": {
       "target": "nsis",
-      "icon": "assets/icon.ico"
+      "icon": "assets/icon.ico",
+      "extraResources": [
+        {
+          "from": "build/amni-control.exe",
+          "to": "amni-control.exe"
+        }
+      ]
     },
     "nsis": {
       "oneClick": true,
@@ -61,20 +66,62 @@
       "uninstallDisplayName": "Amni-Connect"
     },
     "mac": {
-      "target": "dmg"
+      "target": "dmg",
+      "extraResources": [
+        {
+          "from": "build/amni-control",
+          "to": "amni-control"
+        }
+      ]
     },
     "linux": {
       "target": [
         "AppImage",
-        "deb"
+        "deb",
+        "rpm"
       ],
       "category": "Network",
       "maintainer": "Amnibro <amnibro7@gmail.com>",
+      "vendor": "Amniscient, LLC",
+      "synopsis": "E2EE peer-to-peer remote desktop",
+      "description": "End-to-end encrypted remote desktop over WebRTC. One install starts the host UI, embedded signaling, and Rust input daemon.",
+      "artifactName": "Amni-Connect-${version}.${ext}",
+      "executableName": "amni-connect",
+      "icon": "assets/icon.png",
       "desktop": {
         "Name": "Amni-Connect",
         "Comment": "End-to-end encrypted remote desktop",
-        "Categories": "Network;RemoteAccess;"
-      }
+        "Categories": "Network;RemoteAccess;",
+        "StartupWMClass": "amni-connect"
+      },
+      "extraResources": [
+        {
+          "from": "build/amni-control",
+          "to": "amni-control"
+        }
+      ]
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0",
+        "libxdo3 | libxdo4",
+        "libxkbcommon0"
+      ]
+    },
+    "rpm": {
+      "depends": [
+        "libXtst",
+        "libxkbcommon",
+        "libxdo"
+      ]
     },
     "publish": [
       {
