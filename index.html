@@ -765,19 +765,6 @@
             loadSources(false);
         }, MON_REFRESH_MS);
 
-        function pushInputBounds(mon, streamW, streamH) {
-            const w = streamW || mon?.width;
-            const h = streamH || mon?.height;
-            if (!mon || !w || !h) return;
-            window.electronAPI?.sendInputEvent?.({
-                type: 'input-bounds',
-                left: mon.left || 0,
-                top: mon.top || 0,
-                width: w,
-                height: h
-            });
-        }
-
         async function createAndHost() {
             initSocket();
             const customCode = document.getElementById('customRoomCode').value.trim().toUpperCase();
@@ -797,7 +784,6 @@
                     const hw = await window.electronAPI.startHwCapture({ fps, kbps, output: monIdx });
                     if (hw && hw.ok) {
                         hwPath = true;
-                        pushInputBounds(src, hw.width, hw.height);
                         log(`HW capture ${hw.encoder || 'h264'} ${hw.width || ''}×${hw.height || ''} @ ${fps}fps`, 'success');
                     } else {
                         log('HW capture unavailable — Chromium desktop capture' + (hw && hw.reason ? ' (' + hw.reason + ')' : ''));
@@ -835,9 +821,6 @@
                 setStatus('Hosting \u2022 E2EE', '#22c55e');
                 setLiveSettings(true);
                 log(`Room ${roomId} created — sharing: ${src.name}`, 'success');
-                const vt = localStream?.getVideoTracks?.()?.[0];
-                const ts = vt?.getSettings?.();
-                pushInputBounds(src, ts?.width, ts?.height);
                 if (userClickedHost && document.getElementById('trayToggle').checked && window.electronAPI?.hideToTray) {
                     const hid = await window.electronAPI.hideToTray('Hosting ' + roomId);
                     if (hid && hid.status === 'hidden') log('Hosting in tray — click the Amni-Connect icon to show the window');

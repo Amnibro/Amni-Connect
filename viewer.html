@@ -31,18 +31,18 @@ button.danger{background:#ef4444}
 #signal-pill.on{display:inline-flex}
 #signal-dot{width:7px;height:7px;border-radius:50%;background:#64748b}
 #viewer-screen{flex:1;display:none;position:relative;background:#000;overflow:hidden;min-height:0}
-#zoom-container{position:absolute;top:0;left:0;right:0;bottom:var(--toolbar-h);transform-origin:0 0}
+#zoom-container{position:absolute;inset:0;transform-origin:0 0}
 video,#remote-canvas{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none}
 #remote-canvas{display:none}
 #touch-overlay{position:absolute;inset:0;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none}
-#toolbar{position:absolute;left:0;right:0;bottom:0;display:flex;flex-wrap:nowrap;align-items:stretch;gap:6px;padding:8px 10px;background:rgba(0,0,0,.72);backdrop-filter:blur(8px);z-index:60;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right));padding-bottom:max(8px,env(safe-area-inset-bottom))}
+#toolbar{position:fixed;left:0;right:0;bottom:0;display:flex;flex-wrap:nowrap;align-items:stretch;gap:6px;padding:8px 10px;background:rgba(0,0,0,.72);backdrop-filter:blur(8px);z-index:60;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right));padding-bottom:max(8px,env(safe-area-inset-bottom))}
 #toolbar::-webkit-scrollbar{display:none}
 #toolbar button{width:auto;min-width:52px;flex:0 0 auto;padding:10px 10px;font-size:12px;border-radius:6px;margin:0;white-space:nowrap}
 #toolbar #zoom-out,#toolbar #zoom-in{min-width:44px;padding:10px 8px}
 #toolbar #dc-btn{min-width:40px;padding:10px 12px}
-#keyboard-bar{position:absolute;bottom:var(--toolbar-h);left:0;right:0;display:none;padding:8px;background:rgba(0,0,0,.92);z-index:55;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation;max-height:min(58vh,calc(100% - var(--toolbar-h) - 44px));overflow-y:auto;padding-left:max(8px,env(safe-area-inset-left));padding-right:max(8px,env(safe-area-inset-right));padding-bottom:max(8px,env(safe-area-inset-bottom))}
-#clipboard-bar{position:absolute;bottom:var(--toolbar-h);left:0;right:0;display:none;padding:10px;background:rgba(0,0,0,.8);z-index:54;max-height:min(50vh,calc(100% - var(--toolbar-h) - 44px));overflow-y:auto;padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right));padding-bottom:max(10px,env(safe-area-inset-bottom))}
-#file-progress{position:absolute;bottom:var(--toolbar-h);left:0;right:0;display:none;padding:10px 14px;background:rgba(0,0,0,.85);z-index:56;padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env(safe-area-inset-right))}
+#keyboard-bar{position:fixed;bottom:var(--toolbar-h);left:0;right:0;display:none;padding:8px;background:rgba(0,0,0,.92);z-index:55;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation;max-height:min(58vh,calc(100dvh - var(--toolbar-h) - 44px));overflow-y:auto;padding-left:max(8px,env(safe-area-inset-left));padding-right:max(8px,env(safe-area-inset-right));padding-bottom:max(8px,env(safe-area-inset-bottom))}
+#clipboard-bar{position:fixed;bottom:var(--toolbar-h);left:0;right:0;display:none;padding:10px;background:rgba(0,0,0,.8);z-index:54;max-height:min(50vh,calc(100dvh - var(--toolbar-h) - 44px));overflow-y:auto;padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right));padding-bottom:max(10px,env(safe-area-inset-bottom))}
+#file-progress{position:fixed;bottom:var(--toolbar-h);left:0;right:0;display:none;padding:10px 14px;background:rgba(0,0,0,.85);z-index:56;padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env(safe-area-inset-right))}
 #mode-btn{background:#475569}
 #zoom-btn{background:#3b82f6}
 #kb-btn{background:#334155}
@@ -562,9 +562,18 @@ function sourceSize() {
   else if (lastSrcSize.w) return lastSrcSize;
   return { w: w || 0, h: h || 0 };
 }
+function touchTargetRect() {
+  const r = overlay.getBoundingClientRect();
+  const tb = document.getElementById('toolbar');
+  if (!tb || window.getComputedStyle(tb).display === 'none') return r;
+  const top = tb.getBoundingClientRect().top;
+  if (top >= r.bottom - 1) return r;
+  const height = Math.max(1, top - r.top);
+  return { left: r.left, top: r.top, width: r.width, height };
+}
 function getVideoRect() {
   const { w: vw, h: vh } = sourceSize();
-  const r = overlay.getBoundingClientRect();
+  const r = touchTargetRect();
   if (!vw || !vh) return { left: r.left, top: r.top, width: r.width, height: r.height };
   const cAR = r.width / r.height, vAR = vw / vh;
   const dW = vAR > cAR ? r.width : r.height * vAR;
@@ -607,7 +616,7 @@ function maxZoom() {
   return !src.w || !base ? 8 : Math.min(ZOOM_HARD_MAX, Math.max(4, src.w / base * ZOOM_PX_PER_SRC));
 }
 function setZoom(next, clientX, clientY) {
-  const prev = currentZoom, r = document.getElementById('zoom-container').getBoundingClientRect();
+  const prev = currentZoom, r = document.getElementById('viewer-screen').getBoundingClientRect();
   currentZoom = Math.max(ZOOM_MIN, Math.min(maxZoom(), next));
   if (currentZoom === prev) return false;
   const k = currentZoom / prev, ax = clientX - r.left, ay = clientY - r.top;
@@ -617,7 +626,7 @@ function setZoom(next, clientX, clientY) {
   return true;
 }
 function zoom(factor) {
-  const r = document.getElementById('zoom-container').getBoundingClientRect();
+  const r = document.getElementById('viewer-screen').getBoundingClientRect();
   setZoom(currentZoom * factor, r.left + r.width / 2, r.top + r.height / 2) &&
     (applyTransform(false), showToast(`${currentZoom.toFixed(currentZoom < 10 ? 1 : 0)}×`));
 }

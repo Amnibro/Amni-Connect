@@ -1,5 +1,11 @@
 # Amni-Connect Changelog
 
+## v1.5.14 — touch coords: clip to toolbar, revert input-bounds (2026-09-02)
+
+### Fixed
+- **Portrait taps still landed far from the cursor.** The PR #1 toolbar work never changed `screenCoord` math; it changed the box we measured. Restored full-bleed `#zoom-container` (`absolute inset:0`) and `position:fixed` toolbar like pre-merge, then clip the touch target to the toolbar's live top edge in `touchTargetRect()` so letterboxing ignores the bar without CSS `--toolbar-h` hacks.
+- **Reverted host `input-bounds`.** Single-monitor hosts map 0–1 to `main_display()` again; the 1.5.12 bounds pass was skewing clicks.
+
 ## v1.5.13 — touch coords take 2 (2026-09-02)
 
 ### Fixed
