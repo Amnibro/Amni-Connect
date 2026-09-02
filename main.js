@@ -269,19 +269,53 @@ function createWindow() {
   });
 }
 
+function elevatedTaskXml(bin) {
+  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>Amni-Connect elevated input daemon</Description></RegistrationInfo>
+  <Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers>
+  <Principals><Principal id="Author"><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>5</Priority>
+  </Settings>
+  <Actions Context="Author"><Exec><Command>${esc(bin)}</Command><WorkingDirectory>${esc(path.dirname(bin))}</WorkingDirectory></Exec></Actions>
+</Task>`;
+}
+function createElevatedTask(bin) {
+  const xmlPath = path.join(USER_DATA, 'amni-control-task.xml');
+  try {
+    fs.mkdirSync(USER_DATA, { recursive: true });
+    fs.writeFileSync(xmlPath, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(elevatedTaskXml(bin), 'utf16le')]));
+  } catch (_) { return hostStatus('Elevated input task missing - remote typing into admin windows may fail'); }
+  const c = spawn('schtasks', ['/create', '/tn', ELEVATED_TASK, '/xml', xmlPath, '/f'], { stdio: 'ignore' });
+  c.on('error', () => { elevatedTask = false; hostStatus('Elevated input task missing - remote typing into admin windows may fail'); });
+  c.on('exit', (ok) => {
+    elevatedTask = ok === 0;
+    hostStatus(ok === 0 ? 'Created elevated input task' : 'Elevated input task missing - remote typing into admin windows may fail');
+  });
+}
 function ensureElevatedTask() {
   if (process.platform !== 'win32') return;
   const bin = rustBinPath();
-  const q = spawn('schtasks', ['/query', '/tn', ELEVATED_TASK], { stdio: 'ignore' });
+  const chunks = [];
+  const q = spawn('schtasks', ['/query', '/tn', ELEVATED_TASK, '/xml'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  q.stdout.on('data', (d) => chunks.push(d));
+  q.on('error', () => createElevatedTask(bin));
   q.on('exit', (code) => {
-    if (code === 0) return;
-    const tr = `"${bin}"`;
-    const args = ['/create', '/tn', ELEVATED_TASK, '/tr', tr, '/sc', 'onlogon', '/rl', 'HIGHEST', '/f', '/it'];
-    const c = spawn('schtasks', args, { stdio: 'ignore' });
-    c.on('exit', (ok) => {
-      if (ok === 0) return hostStatus('Created elevated input task');
-      hostStatus('Elevated input task missing - remote typing into admin windows may fail');
-    });
+    const out = Buffer.concat(chunks).toString('utf16le');
+    const cmd = (out.match(/<Command>([^<]*)<\/Command>/) || [])[1] || '';
+    if (code === 0 && cmd.trim().toLowerCase() === bin.toLowerCase()) return;
+    createElevatedTask(bin);
   });
 }
 

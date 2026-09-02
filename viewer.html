@@ -31,8 +31,9 @@ button.danger{background:#ef4444}
 #signal-pill.on{display:inline-flex}
 #signal-dot{width:7px;height:7px;border-radius:50%;background:#64748b}
 #viewer-screen{flex:1;display:none;position:relative;background:#000;overflow:hidden;min-height:0}
-#zoom-container{position:absolute;inset:0;transform-origin:0 0}
-video,#remote-canvas{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none}
+#zoom-container{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transform-origin:0 0}
+#media-fit{position:relative;flex:0 0 auto;line-height:0;width:100%;height:100%;overflow:hidden;background:#000}
+#remote-video,#remote-canvas{display:block;width:100%;height:100%;pointer-events:none}
 #remote-canvas{display:none}
 #touch-overlay{position:absolute;inset:0;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-user-drag:none}
 #toolbar{position:fixed;left:0;right:0;bottom:0;display:flex;flex-wrap:nowrap;align-items:stretch;gap:6px;padding:8px 10px;background:rgba(0,0,0,.72);backdrop-filter:blur(8px);z-index:60;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right));padding-bottom:max(8px,env(safe-area-inset-bottom))}
@@ -96,8 +97,10 @@ video,#remote-canvas{width:100%;height:100%;object-fit:contain;display:block;poi
 
 <div id="viewer-screen">
   <div id="zoom-container">
-    <video id="remote-video" autoplay playsinline muted></video>
-    <canvas id="remote-canvas"></canvas>
+    <div id="media-fit">
+      <video id="remote-video" autoplay playsinline muted></video>
+      <canvas id="remote-canvas"></canvas>
+    </div>
     <div id="touch-overlay"></div>
   </div>
   <div id="keyboard-bar">
@@ -226,6 +229,7 @@ function useHwSurface(on) {
   const c = document.getElementById('remote-canvas');
   if (c) c.style.display = on ? 'block' : 'none';
   if (v) v.style.display = on ? 'none' : 'block';
+  layoutMediaFit();
 }
 function ensureHwDec(w, h, codec) {
   if (hwDec && hwDec.state !== 'closed') return hwDec;
@@ -239,6 +243,7 @@ function ensureHwDec(w, h, codec) {
       if (hwCanvas.width !== frame.displayWidth || hwCanvas.height !== frame.displayHeight) {
         hwCanvas.width = frame.displayWidth;
         hwCanvas.height = frame.displayHeight;
+        layoutMediaFit();
       }
       ctx.drawImage(frame, 0, 0);
       frame.close();
@@ -352,7 +357,7 @@ function connect() {
     document.getElementById('connect-screen').style.display = 'none';
     document.getElementById('viewer-screen').style.display = 'block';
     document.getElementById('toolbar').style.display = 'flex';
-    requestAnimationFrame(() => { layoutViewerChrome(); requestAnimationFrame(layoutViewerChrome); });
+    requestAnimationFrame(() => { layoutViewerChrome(); layoutMediaFit(); requestAnimationFrame(() => { layoutViewerChrome(); layoutMediaFit(); }); });
     createPC();
   });
   socket.on('error', (msg) => setStatus(`Error: ${msg}`));
@@ -428,6 +433,7 @@ function createPC() {
     const v = document.getElementById('remote-video');
     v.srcObject = streams[0];
     v.play().catch(()=>{});
+    layoutMediaFit();
     setStatus('Streaming \u25cf Live');
     startViewerStats();
   };
@@ -546,39 +552,32 @@ function setDragMode(on) {
 // ── View state ───────────────────────────────────────────────────────────────
 const overlay = document.getElementById('touch-overlay');
 let panX = 0, panY = 0, currentZoom = 1;
-let lastSrcSize = { w: 0, h: 0 };
 
 function sourceSize() {
   const c = document.getElementById('remote-canvas');
-  if (hwUsing && c && c.width) { lastSrcSize = { w: c.width, h: c.height }; return lastSrcSize; }
+  if (hwUsing && c && c.width) return { w: c.width, h: c.height };
   const v = document.getElementById('remote-video');
-  let w = v.videoWidth, h = v.videoHeight;
-  if ((!w || !h) && pc) {
-    const t = pc.getReceivers().map(r => r.track).find(t => t && t.kind === 'video');
-    const s = t && t.getSettings && t.getSettings();
-    if (s && s.width && s.height) { w = s.width; h = s.height; }
-  }
-  if (w && h) lastSrcSize = { w, h };
-  else if (lastSrcSize.w) return lastSrcSize;
-  return { w: w || 0, h: h || 0 };
+  return { w: v.videoWidth || 0, h: v.videoHeight || 0 };
 }
-function touchTargetRect() {
-  const r = overlay.getBoundingClientRect();
-  const tb = document.getElementById('toolbar');
-  if (!tb || window.getComputedStyle(tb).display === 'none') return r;
-  const top = tb.getBoundingClientRect().top;
-  if (top >= r.bottom - 1) return r;
-  const height = Math.max(1, top - r.top);
-  return { left: r.left, top: r.top, width: r.width, height };
+function containSize(bw, bh, vw, vh) {
+  if (!vw || !vh || !bw || !bh) return null;
+  const scale = Math.min(bw / vw, bh / vh);
+  return { w: Math.max(1, Math.round(vw * scale)), h: Math.max(1, Math.round(vh * scale)) };
+}
+function layoutMediaFit() {
+  const box = document.getElementById('zoom-container');
+  const fit = document.getElementById('media-fit');
+  if (!box || !fit) return;
+  const { w: vw, h: vh } = sourceSize();
+  const size = containSize(box.clientWidth, box.clientHeight, vw, vh);
+  if (!size) { fit.style.width = '100%'; fit.style.height = '100%'; return; }
+  fit.style.width = size.w + 'px';
+  fit.style.height = size.h + 'px';
 }
 function getVideoRect() {
-  const { w: vw, h: vh } = sourceSize();
-  const r = touchTargetRect();
-  if (!vw || !vh) return { left: r.left, top: r.top, width: r.width, height: r.height };
-  const cAR = r.width / r.height, vAR = vw / vh;
-  const dW = vAR > cAR ? r.width : r.height * vAR;
-  const dH = vAR > cAR ? r.width / vAR : r.height;
-  return { left: r.left + (r.width - dW) / 2, top: r.top + (r.height - dH) / 2, width: dW, height: dH };
+  const fit = document.getElementById('media-fit');
+  if (fit && fit.offsetWidth > 1) return fit.getBoundingClientRect();
+  return overlay.getBoundingClientRect();
 }
 
 function screenCoord(clientX, clientY) {
@@ -1096,15 +1095,22 @@ if (kbClearBtn) { kbClearBtn.onclick = null; bindPress(kbClearBtn, clearKb); }
 
 function layoutViewerChrome() {
   const tb = document.getElementById('toolbar');
-  if (!tb || getComputedStyle(tb).display === 'none') return;
-  document.documentElement.style.setProperty('--toolbar-h', Math.ceil(tb.getBoundingClientRect().height) + 'px');
+  if (tb && getComputedStyle(tb).display !== 'none') {
+    document.documentElement.style.setProperty('--toolbar-h', Math.ceil(tb.getBoundingClientRect().height) + 'px');
+  }
+  layoutMediaFit();
 }
 const _tbEl = document.getElementById('toolbar');
 if (_tbEl && typeof ResizeObserver !== 'undefined') new ResizeObserver(layoutViewerChrome).observe(_tbEl);
 window.addEventListener('resize', layoutViewerChrome);
 if (window.visualViewport) window.visualViewport.addEventListener('resize', layoutViewerChrome);
+const _zoomBox = document.getElementById('zoom-container');
+if (_zoomBox && typeof ResizeObserver !== 'undefined') new ResizeObserver(layoutMediaFit).observe(_zoomBox);
 const _remoteVideo = document.getElementById('remote-video');
-if (_remoteVideo) _remoteVideo.addEventListener('loadedmetadata', () => { lastSrcSize = { w: 0, h: 0 }; sourceSize(); });
+if (_remoteVideo) {
+  _remoteVideo.addEventListener('loadedmetadata', layoutMediaFit);
+  _remoteVideo.addEventListener('resize', layoutMediaFit);
+}
 
 function toggleKeyboard() {
   const bar = document.getElementById('keyboard-bar');

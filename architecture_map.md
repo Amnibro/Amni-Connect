@@ -1,5 +1,39 @@
 # Amni-Connect Architecture Map
 
+## 2026-09-02 v1.5.16 the host's coordinate space is physical pixels, and it is not optional
+
+- **`amni-control.exe` must be DPI-aware.** `enigo.move_mouse(_, _, Coordinate::Abs)` and
+  `SetCursorPos` address **physical** pixels, but `enigo.main_display()` returns whatever
+  `GetSystemMetrics` gives *this process* — logical pixels unless the process declares awareness.
+  On a 3440x1440 panel at 125% that is 2752x1152, so `apply()`'s `x * sw` sent the cursor to at most
+  80% of the screen on both axes. `make_dpi_aware()` calls
+  `SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)` before `Ctl::new` and the whole daemon then
+  speaks one coordinate system.
+- **A scaled display makes the viewer look guilty.** The error is a *multiplier*, not an offset, so
+  taps near the top-left land almost right and taps near the bottom-right are wildly off — the exact
+  signature of a letterbox/`object-fit` bug. v1.5.12 through v1.5.15 all rewrote viewer geometry
+  chasing it. Before touching `screenCoord`, drive `:7878` directly with normalized 0, 0.5 and 1.0
+  and read the cursor back: it takes 20 seconds and it settles which side owns the bug.
+- **`verify()` is only meaningful when target and readback share units.** With the daemon
+  DPI-unaware, `location()` returned physical while the target was logical, so every move was a
+  miss: `MISS_DIRECT` flipped it to `SetCursorPos`, `MISS_FATAL` exited the process, Electron
+  respawned it, and the control + `:7879` video sockets dropped each time. 105 misses and 22 exits
+  in one log. A "miss" storm with `errs:0` means a unit mismatch, not a wedged daemon.
+- **`schtasks /create /tr` cannot be driven from node's `spawn`.** Windows argument escaping rewrote
+  the quoted binary path, and the task registered as `<Command>C:\Program</Command>` with the rest
+  as `<Arguments>` — 0x80070002 on every `/run`, silently, so `trySpawnRust` fell back to
+  `spawnRustDirect` and the daemon ran Medium IL. The v1.5.4 UIPI fix was therefore inert for its
+  whole life. Register from XML (`schtasks /create /tn NAME /xml file /f`, UTF-16LE + BOM) and
+  verify by reading `<Command>` back, not by trusting the create exit code.
+- `ensureElevatedTask` compares the registered `<Command>` against `rustBinPath()` and re-registers
+  on mismatch, so a reinstall to a new path self-heals. The XML also clears
+  `DisallowStartIfOnBatteries` / `StopIfGoingOnBatteries`, which `/create` defaults to true.
+- Task creation lives in `main.js` only; `scripts/installer.nsh` deletes any stale task instead of
+  creating a second, differently-configured one.
+- To prove the elevated path actually worked, read the integrity level of the running process
+  (`TokenIntegrityLevel`, expect `S-1-16-12288` HIGH). A process merely *existing* on `:7878` proves
+  nothing about which spawn path produced it.
+
 ## 2026-09-02 v1.5.11 Linux packages ship like Windows Setup
 - `package.json` `win.extraResources` / `linux.extraResources` / `mac.extraResources` each pack the matching `amni-control` binary from `build/`.
 - Linux targets: AppImage + deb + rpm. Artifact names `Amni-Connect-${version}.{AppImage,deb,rpm}`. `.deb` depends include `libxdo3|libxdo4`, `libxkbcommon0`, `libxtst6`.
@@ -44,7 +78,9 @@
 - Do NOT test keyboard input by calling `SetForegroundWindow`: a script cannot steal foreground, and
   the daemon's own console window holds it when started by `schtasks`. Minimise that console and let
   the **daemon click into the target**; calibrate with two injected clicks and read `e.screenX` vs
-  `e.clientX` (offset only, scale 1 at this display).
+  `e.clientX`. Do not read that comparison as proof the display is unscaled — this panel runs 125%
+  (3440x1440 physical / 2752x1152 logical); browser CSS pixels are logical, so the ratio hides it.
+  See the v1.5.16 note.
 - Rebuilding `amni-control.exe` needs a kill-and-retry loop: Electron's `trySpawnRust` respawns the
   daemon within seconds and re-locks the file. After rebuilding, restart through
   `schtasks /run /tn AmniControlElevated` or the daemon comes back at **Medium** integrity and every

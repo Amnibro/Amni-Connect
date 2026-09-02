@@ -28,6 +28,18 @@ struct InputEvent {
     room_id: Option<String>,
 }
 #[cfg(windows)]
+fn make_dpi_aware() -> bool {
+    use windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, DPI_AWARENESS_CONTEXT_SYSTEM_AWARE};
+    unsafe {
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).is_ok()
+            || SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE).is_ok()
+    }
+}
+#[cfg(not(windows))]
+fn make_dpi_aware() -> bool {
+    true
+}
+#[cfg(windows)]
 fn set_cursor(x: i32, y: i32) -> bool {
     unsafe { windows::Win32::UI::WindowsAndMessaging::SetCursorPos(x, y) }.is_ok()
 }
@@ -334,10 +346,11 @@ fn spawn_watchdog(ctl: Arc<Mutex<Ctl>>) {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::Builder::new().filter_level(log::LevelFilter::Error).parse_default_env().init();
+    let dpi = make_dpi_aware();
     let ctl = Arc::new(Mutex::new(Ctl::new()?));
     {
         let c = lock_ctl(&ctl);
-        eprintln!("[amni-control] v1.5.7 ready display {}x{}", c.sw, c.sh);
+        eprintln!("[amni-control] v1.5.16 ready display {}x{} dpi-aware={}", c.sw, c.sh, dpi);
     }
     spawn_watchdog(Arc::clone(&ctl));
     #[cfg(windows)]
@@ -405,5 +418,27 @@ mod tests {
         assert!(!wants_shift("Shift"));
         assert!(!wants_shift("KeyA"));
         assert!(!wants_shift("Enter"));
+    }
+    #[cfg(windows)]
+    fn physical_primary() -> (u32, u32) {
+        use windows::core::PCWSTR;
+        use windows::Win32::Graphics::Gdi::{EnumDisplaySettingsW, DEVMODEW, ENUM_CURRENT_SETTINGS};
+        let mut dm = DEVMODEW { dmSize: std::mem::size_of::<DEVMODEW>() as u16, ..Default::default() };
+        let _ = unsafe { EnumDisplaySettingsW(PCWSTR::null(), ENUM_CURRENT_SETTINGS, &mut dm) };
+        (dm.dmPelsWidth, dm.dmPelsHeight)
+    }
+    #[cfg(windows)]
+    #[test]
+    fn normalized_coords_reach_the_physical_edge() {
+        assert!(make_dpi_aware());
+        let (pw, ph) = physical_primary();
+        assert!(pw > 0 && ph > 0);
+        let eng = Enigo::new(&Settings::default()).unwrap();
+        let (sw, sh) = eng.main_display().unwrap();
+        assert_eq!(
+            (sw as u32, sh as u32),
+            (pw, ph),
+            "main_display must report physical pixels or normalized 1.0 lands short by the DPI scale"
+        );
     }
 }

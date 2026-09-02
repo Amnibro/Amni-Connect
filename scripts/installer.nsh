@@ -1,5 +1,5 @@
 !macro customInstall
-  nsExec::ExecToLog 'schtasks /create /tn AmniControlElevated /tr $\"$INSTDIR\resources\amni-control.exe$\" /sc onlogon /rl HIGHEST /f /it'
+  nsExec::ExecToLog `schtasks /delete /tn AmniControlElevated /f`
 !macroend
 
 !macro customUnInstall

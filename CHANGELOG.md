@@ -1,5 +1,41 @@
 # Amni-Connect Changelog
 
+## v1.5.16 — the touch offset was on the host, not the viewer (2026-09-02)
+
+### Fixed
+- **Every tap landed at 80% of where it should.** `amni-control.exe` was DPI-unaware, so
+  `enigo.main_display()` returned the *logical* primary size (2752x1152 at 125% scale) while
+  `enigo.move_mouse(Abs)` interprets its argument as a *physical* pixel (3440x1440). Normalized
+  `1.0` therefore drove the cursor to physical 2752 — exactly `1/1.25` of the screen. The error is
+  multiplicative, so it read as "close near the top-left, way off near the bottom-right", which is
+  what sent v1.5.12–v1.5.15 hunting through the viewer's letterbox math. Fix is
+  `SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)` before `Enigo::new`. Verified on `:7878`:
+  `0.5,0.5` → 1376,576 (exact centre), `1.0,1.0` → 2751,1151 (exact edge).
+- **The daemon was killing and restarting itself constantly.** `verify()` compared its `move_mouse`
+  target (logical units) against `location()` (physical units), so every single move counted as a
+  miss. The log holds 105 `move did not land` and 22 `exiting for host respawn`. Each respawn drops
+  the control socket and the HW video socket. `misses` and `errs` now sit at 0.
+- **The elevated input task has never once started.** `schtasks /create /tr "<path>"` was built with
+  node's `spawn`, whose Windows argument escaping mangled the quoting — the registered task was
+  `<Command>C:\Program</Command>` with the rest as `<Arguments>`, failing with 0x80070002 on every
+  run. So `trySpawnRust` always fell through to `spawnRustDirect` and the daemon ran at **Medium**
+  integrity, where UIPI silently eats input whenever an elevated window has foreground (the exact
+  failure v1.5.4 was supposed to close). Task is now registered from XML via
+  `schtasks /create /xml`, and `ensureElevatedTask` re-creates it whenever the stored `<Command>`
+  no longer matches the current binary. Verified: task-launched daemon reads back integrity
+  **HIGH** (S-1-16-12288).
+- **The task refused to run on battery.** `/create` defaults left `DisallowStartIfOnBatteries` and
+  `StopIfGoingOnBatteries` true. Both are false in the XML.
+
+### Changed
+- `scripts/installer.nsh` no longer creates the task; it deletes any stale one and the app
+  registers it from XML on first run, so there is one implementation instead of two.
+
+## v1.5.15 — touch maps to the picture box (2026-09-02)
+
+### Fixed
+- **Portrait taps were still off on both axes.** JS letterboxing of the overlay (and toolbar clipping) did not match the video the phone actually painted. The picture is now sized with `contain` into `#media-fit`; taps map to that box's `getBoundingClientRect()`. No `object-fit` math, no `getSettings` fallback, no toolbar clip in the coord path.
+
 ## v1.5.14 — touch coords: clip to toolbar, revert input-bounds (2026-09-02)
 
 ### Fixed
