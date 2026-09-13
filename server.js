@@ -9,7 +9,9 @@ const socketIo = require('socket.io');
 const { v4: uuidv4 } = require('uuid');
 
 const PORT = process.env.PORT || 3389;
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS === '*' ? '*' : (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim());
+const ALLOWED_ORIGINS = (!process.env.ALLOWED_ORIGINS || process.env.ALLOWED_ORIGINS === '*')
+  ? '*'
+  : process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim());
 const DATA_ROOT = process.env.APPDATA ? path.join(process.env.APPDATA, 'amni-connect') : __dirname;
 const INBOX_DIR = process.env.INBOX_DIR || path.join(DATA_ROOT, 'received-files');
 fs.mkdirSync(INBOX_DIR, { recursive: true });
@@ -26,9 +28,15 @@ const upload = multer({
   limits: { fileSize: 2 * 1024 * 1024 * 1024 }
 });
 
+const auth = require('./auth').createAuth(DATA_ROOT);
+app.use(express.json({ limit: '64kb' }));
+auth.routes(app);
+const gate = (req, res, next) => auth.allowed(req.headers) ? next() : res.status(401).json({ error: 'passkey required', authRequired: true });
 app.use('/socket.io-client', express.static(path.join(__dirname, 'node_modules', 'socket.io-client', 'dist')));
 app.get('/viewer', (_, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('CDN-Cache-Control', 'no-store');
+  res.set('Cloudflare-CDN-Cache-Control', 'no-store');
   res.set('Pragma', 'no-cache');
   res.set('Expires', '0');
   res.sendFile(path.join(__dirname, 'viewer.html'));
@@ -46,7 +54,7 @@ app.get('/qr', async (req, res) => {
   } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
 });
 
-app.post('/upload', (req, res) => {
+app.post('/upload', gate, (req, res) => {
   upload.single('file')(req, res, (err) => {
     if (err) return res.status(400).json({ status: 'error', message: err.message });
     if (!req.file) return res.status(400).json({ status: 'error', message: 'No file received' });
@@ -58,7 +66,40 @@ app.post('/upload', (req, res) => {
 });
 
 const rooms = new Map();
-const HOST_GRACE_MS = 8000;
+let relayedInput = null;
+const ROOM_FILE = path.join(DATA_ROOT, 'room.json');
+const roomCode = (s) => String(s || '').trim().toUpperCase().replace(/\s+/g, '-').replace(/[^A-Z0-9-]/g, '');
+function persistRoom(id) {
+  try { fs.writeFileSync(ROOM_FILE, JSON.stringify({ id })); } catch (_) {}
+}
+function loadStickyRoom() {
+  try {
+    const id = roomCode(JSON.parse(fs.readFileSync(ROOM_FILE, 'utf8')).id);
+    if (id.length >= 4) rooms.set(id, { host: null, viewers: new Set() });
+  } catch (_) {}
+}
+loadStickyRoom();
+function claimRoom(socket, id) {
+  const existing = rooms.get(id);
+  if (existing) {
+    if (existing.host && existing.host !== socket && existing.host.connected) return null;
+    const hostChanged = existing.host !== socket;
+    if (existing.host && existing.host !== socket) { try { existing.host.leave(id); } catch (_) {} }
+    existing.host = socket;
+    socket.join(id);
+    persistRoom(id);
+    socket.emit('room-created', id);
+    if (hostChanged) {
+      for (const v of existing.viewers) { if (v.connected) socket.emit('viewer-joined', v.id); }
+    }
+    return id;
+  }
+  rooms.set(id, { host: socket, viewers: new Set() });
+  socket.join(id);
+  persistRoom(id);
+  socket.emit('room-created', id);
+  return id;
+}
 
 server.on('error', (err) => {
   if (err?.code === 'EADDRINUSE') {
@@ -76,48 +117,53 @@ function sockIp(socket) {
 function lanIp(ip) {
   if (!ip) return '';
   if (ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('169.254.')) return ip;
+  if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip)) return ip;
   const m = String(ip).match(/^172\.(\d+)\./);
   return m && +m[1] >= 16 && +m[1] <= 31 ? ip : '';
 }
+const TURN_TTL_SECS = 86400;
+function iceServers() {
+  const servers = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+  const secret = process.env.AMNI_CHAT_TURN_SECRET, url = process.env.AMNI_CHAT_TURN_URL;
+  if (!secret || !url) return { iceServers: servers, ttlSecs: TURN_TTL_SECS, turn: false };
+  const username = `${Math.floor(Date.now() / 1000) + TURN_TTL_SECS}:amni`;
+  const credential = crypto.createHmac('sha1', secret).update(username).digest('base64');
+  servers.push({ urls: [url], username, credential });
+  return { iceServers: servers, ttlSecs: TURN_TTL_SECS, turn: true };
+}
+app.get('/ice-servers', gate, (_, res) => { res.set('Cache-Control', 'no-store'); res.json(iceServers()); });
+app.get('/rooms', (req, res) => {
+  if (!auth.isLoopback(req)) return res.status(403).json({ error: 'host window only' });
+  res.json({ rooms: [...rooms].map(([id, r]) => ({ id, host: !!(r.host && r.host.connected), viewers: r.viewers.size })) });
+});
 io.on('connection', (socket) => {
   const mine = lanIp(sockIp(socket));
   if (mine) socket.emit('your-lan', mine);
   socket.on('create-room', (customId) => {
-    let roomId = (customId && typeof customId === 'string' && customId.trim().length >= 4) 
-      ? customId.trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') 
-      : uuidv4().slice(0, 8).toUpperCase();
+    if (auth.isRemote(socket.handshake.headers)) return socket.emit('error', 'Hosting is only available from the host window');
+    let id = roomCode(customId);
+    if (id.length < 4) id = uuidv4().slice(0, 8).toUpperCase();
     // A host reconnecting to its own fixed room code must RECLAIM it, not
     // silently drift to a random id -- that stranded the PC under an unguessable room and
     // looked like "no room" from the phone. Only bump to a random id if a LIVE host holds it.
-    if (!roomId) {
-      roomId = uuidv4().slice(0, 8).toUpperCase();
-    } else {
-      const existing = rooms.get(roomId);
-      if (existing && existing.host && existing.host !== socket && existing.host.connected) {
-        roomId = uuidv4().slice(0, 8).toUpperCase();
-      } else if (existing) {
-        if (existing.host && existing.host !== socket) { try { existing.host.leave(roomId); } catch (_) {} }
-        rooms.delete(roomId);
-      }
-    }
-    
-    rooms.set(roomId, { host: socket, viewers: new Set() });
-    socket.join(roomId);
-    socket.emit('room-created', roomId);
+    if (!claimRoom(socket, id)) claimRoom(socket, uuidv4().slice(0, 8).toUpperCase());
   });
 
   socket.on('join-room', (roomId) => {
-    const room = rooms.get(roomId?.toUpperCase());
+    if (!auth.allowed(socket.handshake.headers)) { socket.emit('auth-required'); return socket.emit('error', 'Passkey required'); }
+    const id = roomCode(roomId);
+    const room = rooms.get(id);
     if (!room) return socket.emit('error', 'Room not found');
-    const id = roomId.toUpperCase();
     socket.join(id);
     room.viewers.add(socket);
     socket.emit('room-joined', id);
-    room.host.emit('viewer-joined', socket.id);
-    const vLan = lanIp(sockIp(socket));
-    const hLan = lanIp(sockIp(room.host));
-    if (hLan) socket.emit('peer-lan', hLan);
-    if (vLan) room.host.emit('peer-lan', vLan);
+    if (room.host && room.host.connected) {
+      room.host.emit('viewer-joined', socket.id);
+      const vLan = lanIp(sockIp(socket));
+      const hLan = lanIp(sockIp(room.host));
+      if (hLan) socket.emit('peer-lan', hLan);
+      if (vLan) room.host.emit('peer-lan', vLan);
+    }
   });
 
   socket.on('offer', (data) => socket.to(data.roomId).emit('offer', data));
@@ -125,31 +171,37 @@ io.on('connection', (socket) => {
   socket.on('ice-candidate', (data) => socket.to(data.roomId).emit('ice-candidate', data));
 
   socket.on('input-event', (data) => {
-    const room = rooms.get(data.roomId?.toUpperCase());
+    if (!auth.allowed(socket.handshake.headers)) return socket.emit('input-dropped', { reason: 'passkey required' });
+    const room = rooms.get(roomCode(data.roomId));
     // Never drop input silently -- a dead relay used to look identical to a working one,
     // because video rides WebRTC peer-to-peer and keeps flowing after signaling dies.
-    if (room && room.host && room.host.connected) room.host.emit('input-event', data);
-    else socket.emit('input-dropped', { roomId: data.roomId, reason: room ? 'host-offline' : 'no-room' });
+    if (!room) return socket.emit('input-dropped', { roomId: data.roomId, reason: 'no-room' });
+    if (relayedInput) relayedInput(data);
+    if (room.host && room.host.connected) room.host.emit('input-event', data);
   });
 
   socket.on('disconnect', () => {
-    for (const [roomId, room] of rooms) {
-      if (room.host === socket) {
-        // Grace period: a host whose websocket blips reclaims the room on reconnect
-        // (index.html re-emits create-room). Only tear the session down if it stays gone.
-        setTimeout(() => {
-          const cur = rooms.get(roomId);
-          if (cur && cur.host === socket) { io.to(roomId).emit('host-disconnected'); rooms.delete(roomId); }
-        }, HOST_GRACE_MS);
-      }
+    for (const [, room] of rooms) {
+      // Keep the room. An 8s delete made "Room not found" the default after a
+      // renderer crash or a quiet socket drop; video on an old viewer kept working
+      // so it looked like the host was up. The next phone then missed the code.
+      if (room.host === socket) room.host = null;
       else if (room.viewers.has(socket)) room.viewers.delete(socket);
     }
   });
 });
 
-server.headersTimeout = 4000;
-server.requestTimeout = 8000;
-server.keepAliveTimeout = 4000;
-server.timeout = 10000;
+// RDP scanners on forwarded :3389 stall without HTTP headers. A 5s headersTimeout
+// also dropped Cloudflare tunnel keep-alives (cloudflared -> localhost:3389), which
+// the edge reports as HTTP 502. Give proxies a minute; disable the socket idle timer.
+server.headersTimeout = 60000;
+server.requestTimeout = 0;
+server.keepAliveTimeout = 65000;
+server.timeout = 0;
+server.on('connection', (sock) => {
+  const ip = sock.remoteAddress || '';
+  if (ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1') sock.setTimeout(0);
+});
 server.listen(PORT, '0.0.0.0', () => console.log(`Amni-Connect signaling server on port ${PORT}\nMobile viewer: http://<your-ip>:${PORT}/viewer`));
+server.setRelayedInput = (fn) => { relayedInput = fn; };
 module.exports = server;

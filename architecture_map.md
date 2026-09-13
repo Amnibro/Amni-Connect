@@ -1,5 +1,101 @@
 # Amni-Connect Architecture Map
 
+## 2026-09-12 v1.6.9 white host window
+
+- **No Google Fonts `@import` in `index.html`.** It blocked first paint. **`main.js`:** `backgroundColor: '#0A0B0E'`, `show: false` until `ready-to-show`. `showWindow` reloads if crashed or URL is not `index.html`. `did-fail-load` / `unresponsive` reload.
+
+## 2026-09-12 v1.6.8 one path per key
+
+- **`viewer.html`:** `sendNow` / `sendMove` relay only when P2P send fails. Dual-send from 1.6.7 doubled glyphs when signaling arrived first.
+- **`main.js` `writeInput`:** still ignores relay within 80ms of a p2p write; also drops identical `key-down` / `key-up` signatures inside 40ms.
+
+## 2026-09-11 v1.6.7 minimize hides; relay applies in main
+
+- **`main.js`:** `minimize` restores then `hideWindow()` (same as close). `writeInput(event, src)` ignores `relay` if a `p2p` write landed in the last 80ms. `server.setRelayedInput` applies signaling `input-event` in the main process. `input-gate` carries view-only / lock.
+- **`viewer.html`:** relay only when P2P send fails.
+
+## 2026-09-11 v1.6.6 capture fit + Caps Lock click
+
+- **`index.html` `fitBox`:** selected stream size is the source display fitted inside the dropdown box, even dimensions, never a different aspect. Daemon still maps 0–1 to the physical desktop.
+- **`rust`:** CapsLock is `Direction::Click` on key-down only. `reset-mods` releases Shift/Ctrl/Alt/Meta and clicks CapsLock off if `GetKeyState(VK_CAPITAL)` is on. Display size is refreshed on each mouse-move.
+
+## 2026-09-11 v1.6.5 offer per viewer id
+
+- **`index.html`:** `viewer-joined` is on `initSocket`. Skip a new offer only when `pc` is live *and* `viewerId === lastViewerId`. Otherwise `createPC()` (closes the old one) and send an offer. The 1.5.x "don't tear down a live peer on signaling rejoin" still holds for the same socket.
+- **`server.js` `claimRoom`:** emit `viewer-joined` for waiting viewers only when the host socket *changes*. The 10s pulse is a same-socket reclaim and stays quiet.
+
+## 2026-09-11 v1.6.4 sticky rooms
+
+- **`server.js`:** `HOST_GRACE_MS` delete is gone. Host disconnect sets `room.host = null` and leaves the id in the map. Last id is `%APPDATA%\\amni-connect\\room.json`; `loadStickyRoom()` puts it back on listen so a join before the renderer claims still hits. `claimRoom` reattaches the host and emits `viewer-joined` for anyone already waiting. Loopback `GET /rooms`.
+- **`index.html`:** 10s `create-room` pulse while hosting. **`viewer.html`:** room code stripped to `[A-Z0-9-]`.
+
+## 2026-09-10 v1.6.3 passkey gate off
+
+- **`auth.js` `REQUIRE_PASSKEY = false`.** `allowed()` is open. `/auth/status` has `required: false`. Viewer `needsPasskey()` checks that flag. Host hides `#remotePanel` unless required. Remote sockets still cannot `create-room`. Set the flag true to restore the gate.
+
+## 2026-09-10 v1.6.2 passkeys do not require UV
+
+- **`auth.js`:** `authenticatorSelection.userVerification` / `residentKey` are `discouraged`. `verifyRegistrationResponse` / `verifyAuthenticationResponse` pass `requireUserVerification: false`. Enroll QR adds `&v=<package.json version>` so `/viewer` is not an edge-cached 1.6.0 page. `/viewer` also sends `CDN-Cache-Control: no-store`.
+- **`viewer.html`:** `fillConnectCard` sets `#connect-screen.innerHTML` to one `.card` (logo lives inside that card during enroll/unlock). `passkeyErr` rewrites the Hello UV string.
+
+## 2026-09-09 v1.6.0 tunnel + passkeys
+
+- **Files:** `auth.js` (WebAuthn + sessions + remote/loopback detection), `server.js` (mounts `auth.routes`, `gate` middleware on `/upload` and `/ice-servers`, socket gates on `join-room` / `create-room` / `input-event`), `main.js` (`startTunnel` / `stopTunnel`, `cloudflaredPath()` search order: resources, Program Files (x86), Program Files, ~/.cloudflared, /usr/local/bin), `viewer.html` (`runEnroll`, `showUnlock`, `passkeyEnroll`, `passkeyLogin`, `refreshAuth`; join waits for `needsPasskey()`), `index.html` (Remote access panel: `paintRemotePanel`, `enrollDevice`, `paintDevices`).
+- **State on disk (`%APPDATA%mni-connect`):** `tunnel.json` {hostname, token, tunnelId} (secret, never in the repo), `passkeys.json` {devices[{id,name,credentialID,publicKey,counter,transports}]}, `auth-secret` (HMAC key for the `amni_sess` cookie), `tunnel.log`.
+- **Remote vs local:** `isRemote(headers)` = Host (or X-Forwarded-Host) equals the tunnel hostname, or `cf-connecting-ip` present. `isLoopback(req)` = 127.0.0.1/::1 socket AND not remote. Everything else (LAN by IP) is open by design. RP ID = hostname, expected origin = `https://hostname`; WebAuthn cannot bind to an IP, so a passkey-only LAN would be impossible without a hostname.
+- **Cloudflare objects:** account 9d4f18f6…, zone amni-scient.com 23d00376…, tunnel `amni-connect` 0cb11072-9066-495f-a7c7-731ebea3f1b0 (config_src cloudflare), DNS CNAME `connect` -> `<id>.cfargotunnel.com` proxied. A separate `cloudflared` Windows service runs the `amni-inc` tunnel; leave it alone.
+- **Enrollment path:** host window `POST /auth/enroll-token` (loopback only) -> QR of `https://host/viewer?enroll=T&code=R` -> phone `POST /auth/enroll/options` (token must be live) -> `navigator.credentials.create` -> `POST /auth/enroll/verify` (token consumed, cookie issued). Login: `/auth/login/options` -> `credentials.get` -> `/auth/login/verify`. Challenges live 2 min in memory; a server restart voids in-flight enrollments.
+- **Stale-install trap (v1.6.0).** After `Setup.exe /S`, check `ExecutablePath` of the running `amni-connect.exe`. NSIS one-click leaves the OLD build running from `%TEMP%
+sN.tmp\old-install\`, and it owns the single-instance lock, so `Start-Process` on the real exe silently re-shows the stale window and you test the wrong binary. `main.js` guards against it now; when verifying an install, still read the process path, not just the `app.asar` timestamp. `tests/test_stale_install_guard.js`.
+- **Counting viewers:** a loopback socket to `:3389` is the host app's own network utility process, NOT a viewer. Only a non-loopback ESTABLISHED socket on `:3389`, or a loopback socket owned by the app's own cloudflared child, means someone is connected.
+- **Host window layout:** `.main` is a CSS grid of three `.card` sections (`#cardSession`, `#cardStream`, `#cardLog`) plus `#remoteScreen`. `.main:has(#remoteScreen[style*="flex"])` switches to the viewing layout (session + log left, video right). Two-column at <=1100px, single column at <=760px. The old `.panel` / `.panel-scroll` / `.v-resizer` are gone; the resizer JS returns early when its elements are missing.
+- **Input telemetry:** `inCount` in `index.html` counts messages per data channel label (`move`, `input`, `clipboard`), socket relay `input-event`, absolute moves and stale-seq drops; logged every 5 s with `pc.connectionState` and `AB.icePath`. `log()` also forwards to main via `renderer-log` IPC -> `host.log` `ui ...`. Read `host.log` before guessing about lag.
+- **Do not inject input while a viewer is connected.** cloudflared -> :3389 ESTABLISHED plus live TURN allocations on 49160-49200 means a phone is on; probes then fight the user's finger, the daemon counts misses and flips `direct=true`, and keystrokes land in whatever window the user has focused.
+- **Diagnose "can't join through the tunnel":** `curl https://connect.amni-scient.com/auth/status` must say `remote:true`; `devices:0` means nobody is enrolled yet; `tunnel.log` must show `Registered tunnel connection`; `host.log` has `tunnel spawn pid=`.
+
+## 2026-09-09 v1.5.20 the elevated task belongs to the installer, and schtasks /query /xml is UTF-8
+
+- **Only an elevated process can register a `RunLevel HighestAvailable` task.** `schtasks /create /xml` from Medium integrity returns `Access is denied` (verified with `runas /trustlevel:0x20000`). The app runs at Medium when launched from the shortcut, so `main.js` can never be the primary registrar. `scripts/installer.nsh` `customInstall` (runs after files are copied, elevated) writes `$INSTDIR
+esourcesmni-control-task.xml` with `FileWriteUTF16LE /BOM` and runs `schtasks /create /tn AmniControlElevated /xml ... /f`. `customUnInstall` does `schtasks /end`, `taskkill /F /IM amni-control.exe`, then `/delete`. Note that electron-builder runs the OLD uninstaller first on upgrade, which deletes the task; `customInstall` re-creates it afterwards.
+- **`schtasks /query /tn NAME /xml` prints UTF-8 with no BOM.** Decode by BOM (`FF FE` = UTF-16LE, else UTF-8). Decoding it as UTF-16LE made `ensureElevatedTask` never match `<Command>`, so it tried to re-create the task on every launch, failed at Medium, and set `elevatedTask = false`, which routed every later `restartRust` through `spawnRustDirect` (Medium).
+- **Repair path in `createElevatedTask`:** plain `schtasks /create` first, then `resources\elevate.exe -wait schtasks /create ...` (one UAC prompt, only meaningful with someone at the console), then `restartRust('elevated task registered')` so the running Medium daemon is replaced by the task-launched High one. `host.log` gets `elevated task create via <schtasks|uac|none> exit=N`.
+- **Proof of a working install:** `schtasks /query /tn AmniControlElevated /xml` Command == `C:\Program Files\Amni-Connect
+esourcesmni-control.exe`; `amni-control.exe` parent is `svchost -s Schedule`; token IL RID 12288; a `{"type":"mouse-move","x":0.5,"y":0.5}` on :7878 lands at 1720,720 while an elevated terminal is in front.
+- **Orphan daemons survive an app kill** (installer, taskkill, crash) and the next app adopts whatever answers on :7878. Pong now carries `elevated` (TokenElevation); `onRustData` restarts through the task once per launch when it sees `elevated:false` while the task exists. `build/amni-control.exe` is a plain copy, so refresh it from `rust/target/release` before `npm run dist` or the installer ships the old daemon.
+- **Remote path = `/ice-servers` + `amni-turn`.** `server.js` `iceServers()` returns STUN + `turn:67.240.56.7:3478` with `username=<unix expiry>:amni`, `credential=base64(HMAC-SHA1(AMNI_CHAT_TURN_SECRET, username))`, TTL 86400. Both env vars are User vars on this box (Amni-Chat's relay owns them); without them the endpoint returns STUN only and `turn:false`. `viewer.html` `loadIce(origin)` runs on socket connect before `join-room`; `index.html` `loadIce()` runs on signaling connect and logs whether TURN is present. `lanIp()` in `server.js` includes 100.64/10 (NordVPN Meshnet) so `your-lan`/`peer-lan` carry the mesh address; `rfc1918()` in the two pages deliberately does NOT, since it drives the LAN bitrate floor and a mesh path can be cellular.
+- The "open a terminal, lose input, still see video" report = Medium daemon + elevated foreground (UIPI). "sig down" alongside it was `server.timeout = 10000` (v1.5.18). Check the daemon's integrity level before any console/DefTerm theory.
+
+## 2026-09-09 v1.5.18 Open in Terminal / DefTerm must not own the host process
+
+- **Symptom:** phone still shows the desktop, chip `sig down`, then the host window flashes and the session is re-offered. Trigger: Explorer right-click → Open in Terminal (Windows 11 default terminal = Windows Terminal).
+- **Cause:** `amni-control.exe` was a console binary. Spawning it from Electron (or via `schtasks`) lets DefTerm attach a console to the daemon; GUI Electron that spawned it without `CREATE_NO_WINDOW` shares that console. WT sending `CTRL_CLOSE_EVENT` kills the whole process group. Signaling lives in that process (`server.js` on :3389), so the viewer's socket dies; WebRTC is P2P and can keep painting. Auto-host on launch then `create-room` reclaims the code and `viewer-joined` used to `createPC()` over the live peer.
+- **Do not** chase this in `viewer.html` letterbox math or ICE. `%APPDATA%\amni-connect\host.log` records `before-quit` / `render-process-gone` / `child-process-gone`. `%APPDATA%\amni-connect\amni-control.log` is the daemon.
+- `amni-control` is `windows_subsystem = "windows"` and `FreeConsole()` at start. Electron spawn uses `windowsHide: true` + `detached: true`. `server.timeout` is 0; RDP probe shedding is `headersTimeout` only.
+- `viewer-joined` skips `createPC()` when `connectionState` is `connected` or `connecting`.
+
+## 2026-09-05 v1.5.17 mouse moves are lossy data; do not carry them on the ordered stream
+
+- **Four data channels now.** `input` (ordered, reliable, high) carries clicks, keys, scroll, and
+  the one move that precedes each of them. `move` (unordered, `maxRetransmits: 0`, high) carries
+  every other `mouse-move` / `mouse-move-rel`, one per viewer animation frame, with a `seq`.
+  `clipboard` and `screen` unchanged.
+- **Why:** an ordered reliable SCTP stream head-of-line blocks on loss; every move queued behind a
+  lost packet waits for the retransmit. A move is superseded by the next move, so losing one costs
+  a frame. Clicks must stay reliable and ordered relative to their move, which is why the pre-click
+  move is flushed on `input`, not `move`.
+- **Host `staleMove(seq)`** drops an absolute move whose seq is <= the last applied (window 10000)
+  and every `setupDataChannel` `onopen` resets `lastMoveSeq`; a viewer reload is a new peer and new
+  channels, so counters never need to survive a reconnect.
+- **Diagnosing "cursor lag" — measure the hops in this order, each takes under a minute:**
+  1. `:7878` direct with a cursor read-back (PowerShell TcpClient + `Cursor.Position` spin): expect < 2 ms.
+  2. socket.io `join-room` + `input-event` at 16 ms cadence while sampling `Cursor.Position`:
+     expect a steady 16 ms update train. Careful: joining the room while a phone is connected
+     makes the host re-offer to the room and drops the phone's peer.
+  3. If both are clean, the lag is the WebRTC transport or the phone. Look at the viewer's ICE
+     candidates in the relayed `answer`: only mDNS + srflx means no LAN pair and real loss.
+- `paintLinkChips()` runs only when `inputPath` changes; `getVideoRect()` is cached until the next
+  frame and invalidated by `applyTransform` / `layoutMediaFit`.
+
 ## 2026-09-02 v1.5.16 the host's coordinate space is physical pixels, and it is not optional
 
 - **`amni-control.exe` must be DPI-aware.** `enigo.move_mouse(_, _, Coordinate::Abs)` and
@@ -59,7 +155,7 @@
 - Codec preference and `contentHint=detail` / `maintain-resolution` apply to the Chromium path only. The HW path's sharpness is bitrate + native resolution + pixelated zoom.
 
 ## 2026-08-23 v1.5.6 signaling HTTP timeouts
-- 3389 is the frozen forwarded signaling port. Internet RDP probes complete TCP and then stall Node's HTTP parser. `server.headersTimeout=4000` / `requestTimeout=8000` / `keepAliveTimeout=4000` / `timeout=10000` so those sockets die and `socket.io` from the Electron host (`http://localhost:3389`) can connect. Chip `sig down` is `!socket.connected`.
+- 3389 is the frozen forwarded signaling port. Internet RDP probes complete TCP and then stall Node's HTTP parser. `headersTimeout` drops those. Do **not** set `server.timeout` / `requestTimeout` to a few seconds — that destroys idle socket.io websockets (v1.5.18). Chip `sig down` is `!socket.connected`.
 
 ## 2026-08-17 v1.5.5 the key wire carries CHARACTERS, the OS wants PHYSICAL KEYS
 

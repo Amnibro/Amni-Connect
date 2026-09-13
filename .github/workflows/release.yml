@@ -114,7 +114,18 @@ jobs:
             echo "No artifacts to publish" >&2
             exit 1
           fi
-          notes=$(cat <<EOF
+          mkdir -p aliases
+          win_exe=$(find artifacts -type f -name "Amni-Connect-Setup-${ver}.exe" | head -n1 || true)
+          [ -n "$win_exe" ] && cp "$win_exe" aliases/Amni-Connect-Setup.exe
+          appimage=$(find artifacts -type f -name "Amni-Connect-${ver}.AppImage" | head -n1 || true)
+          [ -n "$appimage" ] && cp "$appimage" aliases/Amni-Connect.AppImage
+          deb=$(find artifacts -type f -name "Amni-Connect-${ver}.deb" | head -n1 || true)
+          [ -n "$deb" ] && cp "$deb" aliases/Amni-Connect.deb
+          rpm=$(find artifacts -type f -name "Amni-Connect-${ver}.rpm" | head -n1 || true)
+          [ -n "$rpm" ] && cp "$rpm" aliases/Amni-Connect.rpm
+          mapfile -t aliases < <(find aliases -type f | sort)
+          files+=("${aliases[@]}")
+          notes=$(cat <<EOF)
           ## Download
 
           **Windows:** [Amni-Connect-Setup-${ver}.exe](https://github.com/Amnibro/Amni-Connect/releases/download/${tag}/Amni-Connect-Setup-${ver}.exe)

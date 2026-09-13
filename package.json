@@ -1,6 +1,6 @@
 {
   "name": "amni-connect",
-  "version": "1.5.16",
+  "version": "1.6.9",
   "description": "End-to-end encrypted Rust + Electron remote desktop",
   "main": "main.js",
   "scripts": {
@@ -16,6 +16,7 @@
     "server": "node server.js"
   },
   "dependencies": {
+    "@simplewebauthn/server": "^14.0.1",
     "dotenv": "^16.6.1",
     "electron-updater": "^6.8.9",
     "express": "^4.21.2",

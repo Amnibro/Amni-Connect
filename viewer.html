@@ -156,11 +156,83 @@ const savedHost = localStorage.getItem('amni-last-host');
 const savedCode = localStorage.getItem('amni-last-code');
 document.getElementById('host-input').value = urlParams.get('host') || savedHost || location.hostname || '';
 document.getElementById('code-input').value = urlParams.get('code') || savedCode || '';
-if (document.getElementById('host-input').value && document.getElementById('code-input').value.length >= 4) {
+if (urlParams.get('enroll')) {
+  setTimeout(() => runEnroll(location.origin), 100);
+} else if (document.getElementById('host-input').value && document.getElementById('code-input').value.length >= 4) {
   setTimeout(connect, 300);
 }
 
-const ICE = [{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}];
+const b64uToBuf = (s) => Uint8Array.from(atob(String(s).replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(String(s).length / 4) * 4, '=')), c => c.charCodeAt(0));
+const bufToB64u = (b) => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const postJson = async (url, body) => { const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}), credentials: 'include' }); const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status)); return j; };
+function credToJson(c) {
+  const r = c.response, out = { id: c.id, rawId: bufToB64u(c.rawId), type: c.type, clientExtensionResults: c.getClientExtensionResults ? c.getClientExtensionResults() : {}, authenticatorAttachment: c.authenticatorAttachment || undefined, response: { clientDataJSON: bufToB64u(r.clientDataJSON) } };
+  if (r.attestationObject) { out.response.attestationObject = bufToB64u(r.attestationObject); out.response.transports = r.getTransports ? r.getTransports() : []; }
+  if (r.authenticatorData) { out.response.authenticatorData = bufToB64u(r.authenticatorData); out.response.signature = bufToB64u(r.signature); out.response.userHandle = r.userHandle ? bufToB64u(r.userHandle) : undefined; }
+  return out;
+}
+async function passkeyEnroll(origin, token, name) {
+  const o = await postJson(origin + '/auth/enroll/options', { token, name });
+  o.challenge = b64uToBuf(o.challenge); o.user.id = b64uToBuf(o.user.id); (o.excludeCredentials || []).forEach(c => c.id = b64uToBuf(c.id));
+  const cred = await navigator.credentials.create({ publicKey: o });
+  return postJson(origin + '/auth/enroll/verify', { token, response: credToJson(cred) });
+}
+async function passkeyLogin(origin) {
+  const { id, options } = await postJson(origin + '/auth/login/options', {});
+  options.challenge = b64uToBuf(options.challenge); (options.allowCredentials || []).forEach(c => c.id = b64uToBuf(c.id));
+  const cred = await navigator.credentials.get({ publicKey: options });
+  return postJson(origin + '/auth/login/verify', { id, response: credToJson(cred) });
+}
+let authState = { enabled: false, remote: false, authed: false };
+async function refreshAuth(origin) {
+  try { authState = await (await fetch(origin + '/auth/status', { credentials: 'include', cache: 'no-store' })).json(); } catch (e) {}
+  return authState;
+}
+function needsPasskey() { return !!authState.required && authState.enabled && authState.remote && !authState.authed; }
+function connectCard() { return document.querySelector('#connect-screen .card'); }
+function passkeyErr(e) {
+  const m = String((e && e.message) || e);
+  if (/user verification|could not be verified/i.test(m)) return 'This device asked for a PIN / fingerprint / Face ID and it failed. Set a screen lock, or tap Create passkey again.';
+  if (/NotAllowed/i.test(m)) return 'Passkey was cancelled. Tap the button to try again.';
+  return m;
+}
+function fillConnectCard(html) {
+  const screen = document.getElementById('connect-screen');
+  if (!screen) return null;
+  document.querySelectorAll('body > .card').forEach(el => el.remove());
+  screen.style.display = 'flex';
+  screen.innerHTML = '<div class="card">' + html + '</div>';
+  return connectCard();
+}
+function showUnlock(origin, then) {
+  fillConnectCard('<div class="logo" style="margin:0 0 8px">Amni-Connect</div><div style="margin-bottom:10px">This host asks for your device passkey</div><button id="unlock-btn">Unlock with passkey</button><div id="unlock-msg" style="margin-top:8px;font-size:12px;opacity:.8"></div>');
+  document.getElementById('unlock-btn').onclick = async () => {
+    const m = document.getElementById('unlock-msg');
+    try { const r = await passkeyLogin(origin); await refreshAuth(origin); showToast('Unlocked as ' + r.device); then(); }
+    catch (e) { m.textContent = passkeyErr(e); }
+  };
+}
+async function runEnroll(origin) {
+  const token = urlParams.get('enroll');
+  if (!token) return false;
+  const guess = /iPhone|iPad/.test(navigator.userAgent) ? 'iPhone' : /Android/.test(navigator.userAgent) ? 'Android phone' : 'This device';
+  fillConnectCard('<div class="logo" style="margin:0 0 8px">Amni-Connect</div><div style="margin-bottom:8px">Register this device with a passkey</div><input id="enroll-name" type="text" value="' + guess + '" style="width:100%;margin-bottom:8px"><button id="enroll-btn">Create passkey</button><div id="enroll-msg" style="margin-top:8px;font-size:12px;opacity:.8"></div>');
+  document.getElementById('enroll-btn').onclick = async () => {
+    const m = document.getElementById('enroll-msg');
+    try { const r = await passkeyEnroll(origin, token, document.getElementById('enroll-name').value.trim() || guess); await refreshAuth(origin); showToast('Passkey saved for ' + r.device); history.replaceState(null, '', location.pathname + '?code=' + encodeURIComponent(urlParams.get('code') || '')); if ((urlParams.get('code') || '').length >= 4) connect(); }
+    catch (e) { m.textContent = passkeyErr(e); }
+  };
+  return true;
+}
+let ICE = [{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}];
+let iceHasTurn = false;
+async function loadIce(origin) {
+  try {
+    const r = await fetch(origin + '/ice-servers', { cache: 'no-store' });
+    const j = await r.json();
+    if (Array.isArray(j.iceServers) && j.iceServers.length) { ICE = j.iceServers; iceHasTurn = !!j.turn; }
+  } catch (e) {}
+}
 let lastIce = { lan: false, label: '' };
 function rfc1918(ip) {
   if (!ip) return false;
@@ -334,8 +406,10 @@ function startViewerStats() {
 function stopViewerStats() { if (viewerStatsLoop) { clearInterval(viewerStatsLoop); viewerStatsLoop = null; } sigPill.classList.remove('on'); }
 
 function connect() {
-  const host = document.getElementById('host-input').value.trim();
-  const code = document.getElementById('code-input').value.trim().toUpperCase();
+  const hostEl = document.getElementById('host-input');
+  const codeEl = document.getElementById('code-input');
+  const host = (hostEl && hostEl.value.trim()) || urlParams.get('host') || localStorage.getItem('amni-last-host') || location.hostname || '';
+  const code = ((codeEl && codeEl.value.trim()) || urlParams.get('code') || localStorage.getItem('amni-last-code') || '').toUpperCase().replace(/\s+/g, '-').replace(/[^A-Z0-9-]/g, '');
   if (!host) return setStatus('Enter host IP or address');
   if (code.length < 4) return setStatus('Room code must be at least 4 characters');
   wantStay = true; iceTries = 0;
@@ -349,7 +423,10 @@ function connect() {
   if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) peerLan = host;
   const origin = /:\d+$/.test(host) ? `${proto}://${host}` : `${proto}://${host}:${port}`;
   socket = io(origin, { transports: ['websocket','polling'] });
-  socket.on('connect', () => { setStatus('Connected to signaling server'); socket.emit('join-room', code); paintLinkChips(); });
+  const joinNow = async () => { await loadIce(origin); socket.emit('join-room', code); paintLinkChips(); };
+  socket.on('connect', async () => { setStatus('Connected to signaling server'); await refreshAuth(origin); needsPasskey() ? (setStatus('Passkey required'), showUnlock(origin, joinNow)) : joinNow(); });
+  socket.on('auth-required', () => { setStatus('Passkey required'); showUnlock(origin, joinNow); });
+  socket.on('disconnect', () => paintLinkChips());
   socket.on('connect_error', () => setStatus('Cannot reach host — check IP and ensure server is running'));
   socket.on('room-joined', (id) => {
     roomId = id;
@@ -444,6 +521,7 @@ function createPC() {
       return;
     }
     if (e.channel.label === 'input') { inputChannel = e.channel; inputChannel.onopen = () => paintLinkChips(); return; }
+    if (e.channel.label === 'move') { moveChannel = e.channel; moveChannel.onopen = () => paintLinkChips(); return; }
     dataChannel = e.channel;
     dataChannel.onopen = () => setStatus('WebRTC: connected (Data+Video)');
     dataChannel.onmessage = (ev) => {
@@ -474,7 +552,7 @@ function createPC() {
   };
 }
 
-let inputPath = 'none', inputWarnedAt = 0, inputChannel = null;
+let inputPath = 'none', inputWarnedAt = 0, inputChannel = null, moveChannel = null, moveSeq = 0, pendingAbs = null, pendingRel = null, moveRaf = 0;
 function sendWire(obj) {
   if (inputChannel?.readyState === 'open') {
     try { inputChannel.send(JSON.stringify(obj)); return 'p2p'; } catch (e) {}
@@ -484,13 +562,48 @@ function sendWire(obj) {
   }
   return null;
 }
-function sendInput(event) {
-  const via = sendWire({ type: 'input', ev: event });
-  if (via) { inputPath = via; paintLinkChips(); return; }
-  if (socket?.connected) { socket.emit('input-event', { ...event, roomId }); inputPath = 'relay'; paintLinkChips(); return; }
-  inputPath = 'none'; paintLinkChips();
+function setInputPath(p) {
+  if (p === inputPath) return;
+  inputPath = p; paintLinkChips();
+}
+function sendNow(event, seq) {
+  const via = sendWire(seq ? { type: 'input', ev: event, seq } : { type: 'input', ev: event });
+  if (via) { setInputPath(via); return; }
+  if (socket?.connected) { socket.emit('input-event', { ...event, roomId }); setInputPath('relay'); return; }
+  setInputPath('none');
   const now = Date.now();
   if (now - inputWarnedAt > 4000) { inputWarnedAt = now; showToast('Input offline - reconnecting'); setStatus('Input offline - control not reaching host'); }
+}
+// Moves are superseded by the next move, so they ride the lossy `move` channel: a dropped packet
+// costs one frame instead of an SCTP retransmit stall for every event queued behind it.
+// The move that precedes a click goes reliable, on the same ordered stream as the click.
+function sendMove(ev, reliable) {
+  const seq = ++moveSeq;
+  if (!reliable && moveChannel?.readyState === 'open') {
+    try { moveChannel.send(JSON.stringify({ type: 'input', ev, seq })); setInputPath('p2p'); return; } catch (e) {}
+  }
+  sendNow(ev, seq);
+}
+function flushMoves(reliable) {
+  if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; }
+  const rel = pendingRel, abs = pendingAbs;
+  pendingRel = null; pendingAbs = null;
+  if (rel) sendMove(rel, reliable);
+  if (abs) sendMove(abs, reliable);
+}
+function sendInput(event) {
+  if (event.type === 'mouse-move') {
+    if (pendingRel) flushMoves(false);
+    pendingAbs = event;
+  } else if (event.type === 'mouse-move-rel') {
+    if (pendingAbs) flushMoves(false);
+    pendingRel = pendingRel ? { type: 'mouse-move-rel', dx: pendingRel.dx + event.dx, dy: pendingRel.dy + event.dy } : event;
+  } else {
+    flushMoves(true);
+    sendNow(event);
+    return;
+  }
+  if (!moveRaf) moveRaf = requestAnimationFrame(() => { moveRaf = 0; flushMoves(false); });
 }
 let lastRightClick = 0;
 function sendRightClick() {
@@ -565,6 +678,7 @@ function containSize(bw, bh, vw, vh) {
   return { w: Math.max(1, Math.round(vw * scale)), h: Math.max(1, Math.round(vh * scale)) };
 }
 function layoutMediaFit() {
+  vrCache = null;
   const box = document.getElementById('zoom-container');
   const fit = document.getElementById('media-fit');
   if (!box || !fit) return;
@@ -574,10 +688,13 @@ function layoutMediaFit() {
   fit.style.width = size.w + 'px';
   fit.style.height = size.h + 'px';
 }
+let vrCache = null;
 function getVideoRect() {
+  if (vrCache) return vrCache;
   const fit = document.getElementById('media-fit');
-  if (fit && fit.offsetWidth > 1) return fit.getBoundingClientRect();
-  return overlay.getBoundingClientRect();
+  vrCache = fit && fit.offsetWidth > 1 ? fit.getBoundingClientRect() : overlay.getBoundingClientRect();
+  (typeof requestAnimationFrame === 'function' ? requestAnimationFrame : setTimeout)(() => { vrCache = null; });
+  return vrCache;
 }
 
 function screenCoord(clientX, clientY) {
@@ -602,6 +719,7 @@ function updateCrisp() {
   if (c) c.style.imageRendering = mode;
 }
 function applyTransform(instant) {
+  vrCache = null;
   const c = document.getElementById('zoom-container');
   c.style.transition = 'none';
   c.style.transform = `translate(${panX}px,${panY}px) scale(${currentZoom})`;
@@ -899,10 +1017,12 @@ overlay.addEventListener('wheel', (e) => {
   if (!desktopActive()) return;
   e.preventDefault();
   if (e.ctrlKey) { setZoom(currentZoom * (e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP), e.clientX, e.clientY) && applyTransform(false); return; }
+  if (currentZoom > 1.05 && !e.shiftKey) { const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1; panX -= e.deltaX * k; panY -= e.deltaY * k; clampPan(); applyTransform(true); return; }
   const sx = e.deltaX ? (e.deltaX > 0 ? 1 : -1) : 0, sy = e.deltaY ? (e.deltaY > 0 ? 1 : -1) : 0;
   (sx || sy) && sendInput({ type: 'mouse-scroll', dx: sx, dy: sy });
 }, { passive: false });
 const PHYS_MODS = ['Control', 'Shift', 'Alt', 'Meta'];
+const TOGGLE_KEYS = ['CapsLock', 'NumLock', 'ScrollLock'];
 const PASS_KEYS = ['F5', 'F11', 'F12'];
 const kbCaptureOn = () => document.getElementById('viewer-screen').style.display !== 'none' && !['INPUT', 'TEXTAREA'].includes((document.activeElement || {}).tagName);
 const physHeld = new Set();
@@ -913,12 +1033,13 @@ function keyFromDom(e) {
 document.addEventListener('keydown', (e) => {
   if (!kbCaptureOn() || PASS_KEYS.includes(e.key)) return;
   e.preventDefault();
-  if (e.repeat && PHYS_MODS.includes(e.key)) return;
+  if (e.repeat && (PHYS_MODS.includes(e.key) || TOGGLE_KEYS.includes(e.key))) return;
+  if (TOGGLE_KEYS.includes(e.key)) { sendInput({ type: 'key-down', key: e.key, code: e.code }); return; }
   physHeld.add(e.key);
   sendInput(keyFromDom(e));
 });
 document.addEventListener('keyup', (e) => {
-  if (PASS_KEYS.includes(e.key)) return;
+  if (PASS_KEYS.includes(e.key) || TOGGLE_KEYS.includes(e.key)) { physHeld.delete(e.key); return; }
   physHeld.delete(e.key);
   if (!kbCaptureOn()) return;
   e.preventDefault();

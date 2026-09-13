@@ -1,5 +1,127 @@
 # Amni-Connect Changelog
 
+## v1.6.9 — host window no longer paints white (2026-09-12)
+
+### Fixed
+- **Host window was a blank white rectangle.** `index.html` started with `@import` of Google Fonts, which blocks the whole stylesheet until that request finishes — hang or no network and Chromium shows the default white canvas. Fonts are system-ui. The BrowserWindow background is `#0A0B0E`, it waits for `ready-to-show`, and Show/tray reloads if the renderer crashed or is not on `index.html`.
+
+## v1.6.8 — stop sending every key twice (2026-09-12)
+
+### Fixed
+- **Letters sometimes came out doubled.** v1.6.7 sent each key on the WebRTC data channel *and* on signaling. When the relay won the race, both landed. P2P is the only path again while the channel is open; signaling is the fallback. Main also drops a key-down/up that matches one from the last 40ms so a cached 1.6.7 viewer cannot keep doubling.
+
+## v1.6.7 — minimize no longer kills remote input (2026-09-11)
+
+### Fixed
+- **Minimize (or clicking minimize from the phone) left video up and input dead.** Chromium freezes the host renderer when the window is minimized; WebRTC video keeps encoding, but taps go through renderer JS into `amni-control`. Minimize now hides to the tray like Close. The viewer also relays every event on signaling; main applies it if the renderer has been quiet for 80ms, so a frozen window still takes clicks.
+
+## v1.6.6 — 1080p keeps the desktop aspect, Caps Lock is a click (2026-09-11)
+
+### Fixed
+- **Mouse missed after changing resolution.** Picking 1080p / 720p on a 3440×1440 desktop asked Chrome for a 16:9 frame, so the picture letterboxed inside the video and taps mapped across the black bars. Capture now fits inside the selected box and keeps the source aspect (1080p → 1920×804 on this PC).
+- **Caps Lock stuck on.** The key was Press on keydown and Release on keyup (and repeats toggled it again). It is one Click on keydown. A new viewer also sends `reset-mods`, which turns Caps Lock off if it was left on.
+
+## v1.6.5 — new viewer gets an offer even if an old peer is live (2026-09-11)
+
+### Fixed
+- **Waiting for stream forever.** The host skipped a new offer whenever *any* WebRTC peer was `connected`, and the 10s room pulse re-fired `viewer-joined` so the log filled with "keeping live WebRTC". A second phone (or a refresh) joined signaling and never got an offer. Skip only for the same viewer id. Same-host reclaim no longer notifies viewers.
+
+## v1.6.4 — room code survives a host socket drop (2026-09-11)
+
+### Fixed
+- **Room not found while the app was still running.** Signaling deleted `ANTMAN-PC` 8s after the host websocket blipped. WebRTC on an already-connected phone kept working, so the PC looked live; the next join missed. Rooms now stay for the life of the process, the last code is written to `room.json` and reloaded on start, and the host republishes every 10s.
+
+## v1.6.3 — tunnel join is room code only (2026-09-10)
+
+### Changed
+- **Passkeys are off.** `REQUIRE_PASSKEY` in `auth.js` is false, so `connect.amni-scient.com/viewer` plus the room code gets you in the same way LAN does. Enroll UI on the host is hidden. Flip the flag to put the gate back.
+
+## v1.6.2 — passkey enroll without Windows Hello (2026-09-10)
+
+### Fixed
+- **Create passkey died with "User verification was required, but user could not be verified."** Registration and login asked for `userVerification: 'preferred'` (and a resident key), which Windows Hello / some Android stacks treat as required. A laptop with no PIN, or a cancelled Hello prompt, failed the ceremony. Options now discourage UV and resident keys (credential IDs already live on the host). Verify accepts a UV-less assertion.
+- **Enrollment still looked double-drawn.** The logo sat above the replaced card, so "Amni-Connect" stacked with itself / the old Connect button on a cached page. Enroll and unlock now replace the whole `#connect-screen`. The QR includes `v=1.6.2` so Cloudflare cannot keep serving the old viewer.
+
+## v1.6.1 — one passkey card, tunnel 502s from short HTTP timeouts (2026-09-10)
+
+### Fixed
+- **Enrollment showed two overlapping windows.** `runEnroll` / `showUnlock` appended a second `.card` on top of `#connect-screen` (logo + host/code form still visible), so "Amni-Connect" and "Create passkey" stacked into garbage. Both flows now replace the single connect card.
+- **Off-network viewers got HTTP 502.** `headersTimeout`/`keepAliveTimeout` were 5s from the old RDP-probe shed. cloudflared keeps localhost connections alive longer than that; Cloudflare then 502s. Timeouts are 60s / 65s, and loopback sockets have no idle timer.
+
+## v1.6.0 — Cloudflare tunnel + device passkeys for rooms (2026-09-09)
+
+### Added
+- **Named Cloudflare tunnel.** `%APPDATA%mni-connect	unnel.json` (`hostname`, `token`) makes the app spawn `cloudflared tunnel run --token` at startup (log: `tunnel.log`, restart with backoff, killed on quit). Tunnel `amni-connect` on the Amniscient account, ingress `connect.amni-scient.com -> http://localhost:3389`, proxied CNAME. The pairing address defaults to `https://<hostname>` when a tunnel is configured.
+- **Passkeys gate every room opened through the tunnel.** `auth.js` (`@simplewebauthn/server`): a request is *remote* when its Host is the tunnel hostname or it carries `cf-connecting-ip`. Remote sockets need a session cookie to `join-room` or relay `input-event`, can never `create-room`, and `/upload` + `/ice-servers` return 401 without one. Loopback and LAN-by-IP stay open (Anthony's call: home Wi-Fi keeps working with just the code).
+- **Enrollment from the host window only.** `POST /auth/enroll-token` is loopback-only and mints a 5-minute single-use link `https://<host>/viewer?enroll=TOKEN&code=ROOM`, shown as a QR in the new Remote access panel with a countdown and the enrolled-device list (remove per device). The phone opens it, names itself, creates a platform passkey (Face/fingerprint), and gets a 30-day HttpOnly session. Later visits show an Unlock with passkey card before joining.
+- `tests/test_passkeys.js`: 20 checks against a live server with a temp APPDATA (remote detection, LAN bypass, gated join/host/ice/upload, loopback-only enrollment, forged cookie). 12 FAIL on the v1.5.20 backups.
+
+- **Host window is a three-card dashboard.** Session (mode, screen picker, room code, QR beside the pairing address, Remote access with the enrollment QR beside the device list), Stream (settings in two columns, stats), and a full-height Connection Log. Joining a session collapses to session + log on the left with the video filling the rest. Nothing lives behind a scroll at 1200x800 any more.
+- **Host log reaches disk.** Every line in the Connection Log is also appended to `%APPDATA%mni-connect\host.log` as `ui ...`, and while input is flowing the host logs a 5-second line `input 5s: move-ch= input-ch= relay= moves= stale= rtc= <ice path>` so a "touch is laggy" report can be read from the file.
+- **The taskbar shortcut kept launching the previous build.** The NSIS one-click installer moves the existing install to `%TEMP%\...\old-install\` and launches that copy, which then holds the single-instance lock, so every later click just re-showed the stale window. `main.js` now bounces out of any copy running from a Temp/old-install path: it relaunches `%ProgramFiles%\Amni-Connectmni-connect.exe` and exits before the lock is taken. Caught by reading `ExecutablePath` of the running process, which read `...
+sg9607.tmp\old-installmni-connect.exe` while `app.asar` on disk was current.
+- **Enrollment links last 20 minutes** instead of 5, so a link can be texted to someone.
+- **A saved LAN pairing address no longer outranks the tunnel.** `100.71.155.240` was still in localStorage, so the pairing QR and the Link button handed out an address nobody off the network can reach. When a tunnel hostname exists and the saved address is private, the tunnel wins and the log says so.
+- **Three-column layout no longer clips the log card** at 1200x800: column minimums are smaller and the two-column breakpoint moved from 1100px to 1240px.
+- **Laptop trackpad pans a zoomed view.** Two-finger swipe (wheel events) moves the view when zoomed past 1.05x, in the same direction as the fingers; Shift+swipe still scrolls the host, Ctrl+swipe (trackpad pinch) still zooms, and at 1x every swipe scrolls the host as before.
+- `tests/probe_symbols.js` types the full US symbol set through `:7878` into a scratch text box and reports what landed. Only run it when no viewer is connected; it drives the real cursor and keyboard.
+
+### Notes
+- Passkeys are bound to the hostname, so a raw IP can never unlock; that is why LAN by IP is exempt rather than gated.
+- Verified live: `https://connect.amni-scient.com/auth/status` reports `remote:true`, a socket join through the tunnel gets `auth-required`, `/ice-servers` through the tunnel is 401, the same join by `192.168.0.7` still lands in `ANTMAN-PC`.
+
+## v1.5.20 — the elevated daemon task never survived an install (2026-09-09)
+
+### Fixed
+- **Every install deleted `AmniControlElevated` and nothing could put it back.** `scripts/installer.nsh` removed the task and left registration to the app, but a Medium-integrity app gets `Access is denied` from `schtasks /create` for any task with `RunLevel HighestAvailable`. So after each Setup.exe the daemon fell back to Medium integrity, and the moment an elevated window (an admin terminal) had foreground, UIPI dropped every move and click with `errs=0`. That is the "open a terminal and lose input but keep watching" report. Reproduced on :7878 with an elevated Windows Terminal in front: cursor stayed at 729,110, pong clean. Installer now writes the task XML (UTF-16LE, BOM) into `resourcesmni-control-task.xml` and registers it while it is already elevated; the uninstaller ends the task and kills the daemon before deleting it.
+- **`ensureElevatedTask` never matched the existing task.** `schtasks /query /xml` prints UTF-8, and the app decoded it as UTF-16LE, so the `<Command>` compare failed on every launch and re-creation ran (and failed) each time, flipping `elevatedTask` to false. Any later daemon restart then spawned Medium. Decoding now follows the BOM.
+- **An orphaned Medium daemon was adopted on the next launch.** The installer and any hard kill leave `amni-control.exe` running, the new app finds :7878 answering and never runs the task. Pong now reports `elevated`, and the app restarts through the task when it adopts a daemon that is not elevated (measured: replaced 50 ms after connect).
+- **App-side repair.** If the task is missing and the plain `schtasks /create` is denied, the app runs it once through the bundled `elevate.exe` (one UAC prompt at the console) and restarts the daemon on the elevated path when that succeeds.
+
+- **Off-network viewers had no relay.** The pairing link advertises the NordVPN Meshnet address first, and a phone on cellular has only STUN to work with, so any path that cannot hole-punch dies at ICE while `sig up` stays green. The signaling server now serves `/ice-servers`: Google STUN plus the box's own `amni-turn` relay (`AMNI_CHAT_TURN_URL`, 24 h HMAC-SHA1 credentials from `AMNI_CHAT_TURN_SECRET`, the coturn REST scheme Amni-Chat already uses). The viewer fetches it before `join-room`; the host fetches it on signaling connect. `lanIp()` also treats 100.64/10 as a direct peer address, so a meshnet viewer's hidden mDNS candidate gets rewritten to its 100.x address like a LAN one.
+
+### Notes
+- `tests/test_ice_servers.js`: static wiring plus a live server with a fake secret, verifies the HMAC and expiry. 9 failures on the pre-TURN backups.
+- `tests/test_elevated_task_install.js`: static checks on installer.nsh and main.js, then registers the installer's XML for real (when elevated) and reads the `<Command>` back. 8 failures on the v1.5.19 backups, all ok on the fix.
+- The v1.5.18 console theory for "sig down" is unproven; the two measured causes are `server.timeout = 10000` (fixed in v1.5.18) and the Medium-integrity daemon above.
+
+## v1.5.19 — host stays up so phones can actually join (2026-09-09)
+
+### Fixed
+- **Nothing could connect.** Closing the window (or a renderer crash, exit 3) quit Electron and took `:3389` with it. The tray now stays from launch; close hides the window and leaves signaling up. A crashed renderer reloads `index.html` instead of sitting blank until you quit.
+- **Phone socket.io was also rejected.** With no `ALLOWED_ORIGINS` env, CORS was `['']`, so a viewer at `http://<lan>:3389/viewer` failed the origin check. Unset now means `*`.
+
+## v1.5.18 — Open in Terminal was killing the host (2026-09-09)
+
+### Fixed
+- **Right-click → Open in Terminal dropped the session.** `amni-control.exe` was a console-subsystem process. Windows 11's default terminal (Windows Terminal) attaches that console; opening a new terminal sends `CTRL_CLOSE_EVENT` to every process on it, which takes Electron with it. Video can keep flowing on WebRTC while the viewer chip goes `sig down`, then the restarted host auto-reclaims the room and looks like something stole the connection. Daemon is now `windows_subsystem = "windows"`, spawned with `windowsHide` + `detached`, and calls `FreeConsole` at start. stderr goes to `%APPDATA%\amni-connect\amni-control.log`.
+- **Idle socket.io was also dying on its own.** v1.5.6 set `server.timeout = 10000` to shed RDP probes on forwarded :3389. Socket.io's ping is 25s, so an idle websocket was destroyed first. `timeout` / `requestTimeout` are 0 again; `headersTimeout` still kills probes that never send HTTP.
+- **A signaling re-join no longer tears down a live peer.** `viewer-joined` used to `createPC()` every time, which dropped the phone's WebRTC whenever the viewer reconnected to :3389.
+
+## v1.5.17 — cursor lag: moves ride a lossy channel, one per frame (2026-09-05)
+
+### Fixed
+- **Cursor trailed the finger over the internet.** Every touchmove became its own message on the
+  `input` data channel, which is ordered and reliable. On a lossy path (this session: phone on a
+  Tailscale/cellular route, mDNS + srflx candidates only, no LAN pair) one dropped packet held every
+  move behind it until SCTP retransmitted, and dcSCTP's minimum RTO is hundreds of ms. Measured the
+  rest of the chain first and cleared it: `:7878` direct is 0.6 ms per move and 60/60 land at an
+  8 ms cadence with Nagle on or off; the socket.io relay -> renderer -> IPC -> daemon hop streams at
+  a steady 16 ms cadence. The stall is the transport, not the host.
+- Host now opens a third channel, `move` (`ordered: false, maxRetransmits: 0, priority: high`).
+  The viewer coalesces `mouse-move` / `mouse-move-rel` to one packet per animation frame (last
+  position wins, trackpad deltas summed) and sends it there with a sequence number. The host drops
+  a `mouse-move` whose sequence went backwards and resets the counter when a channel opens.
+- The move that precedes a click, key, or scroll is flushed **reliable** on the `input` stream so a
+  tap can never land before its move. Anything but moves is unchanged.
+- Viewer no longer repaints the link chips on every event (only when the path changes) and caches
+  `getVideoRect()` per frame, so a touchmove no longer forces a layout after a DOM write.
+
+### Notes
+- `tests/test_move_channel.js`: coalescing, reliable pre-click flush, delta summing, fallback when
+  `move` is closed, stale-seq drop; the v1.5.16 backup sends 10 packets where the fix sends 1.
+- Join mode in `index.html` uses the same channel with its own counter; its mousedown move is reliable.
+
 ## v1.5.16 — the touch offset was on the host, not the viewer (2026-09-02)
 
 ### Fixed

@@ -13,7 +13,7 @@ function sliceFn(src, name) {
   }
   throw new Error('unclosed ' + name);
 }
-eval(sliceFn(ih, 'rankVideoCodec') + '\n' + sliceFn(ih, 'packScreenPackets') + '\n' + sliceFn(ih, 'lockEncodeParams') + '\n' + sliceFn(ih, 'encodeWasDownscaled') + '\n' + sliceFn(ih, 'pasteChord') + '\n' + sliceFn(vh, 'assembleScreen') + '\n' + sliceFn(vh, 'updateCrisp') + '\n' + sliceFn(vh, 'applyTransform') + '\n' + sliceFn(vh, 'sourceSize'));
+eval(sliceFn(ih, 'rankVideoCodec') + '\n' + sliceFn(ih, 'packScreenPackets') + '\n' + sliceFn(ih, 'lockEncodeParams') + '\n' + sliceFn(ih, 'encodeWasDownscaled') + '\n' + sliceFn(ih, 'pasteChord') + '\n' + sliceFn(ih, 'fitBox') + '\n' + sliceFn(vh, 'assembleScreen') + '\n' + sliceFn(vh, 'updateCrisp') + '\n' + sliceFn(vh, 'applyTransform') + '\n' + sliceFn(vh, 'sourceSize'));
 let fail = 0;
 function ok(name, cond) { if (!cond) { console.error('FAIL', name); fail++; } else console.log('ok', name); }
 
@@ -29,6 +29,8 @@ ok('lock forces 1x', locked.encodings[0].scaleResolutionDownBy === 1 && locked.e
 ok('detect scale>1', encodeWasDownscaled({ encodings: [{ scaleResolutionDownBy: 2 }] }, 1920, 1920));
 ok('detect frame shrink', encodeWasDownscaled(null, 1280, 1920));
 ok('native not downscaled', !encodeWasDownscaled({ encodings: [{ scaleResolutionDownBy: 1 }] }, 1920, 1920));
+ok('no google fonts import', !/fonts\.googleapis/.test(ih));
+ok('dark window before paint', mj.includes("backgroundColor: '#0A0B0E'") && mj.includes("ready-to-show"));
 ok('no host backdrop-filter', !/header\s*\{[^}]*backdrop-filter/.test(ih) && !/\.panel\s*\{[^}]*backdrop-filter/.test(ih));
 ok('tray hosting', ih.includes('id="trayToggle"') && ih.includes('hideToTray') && mj.includes('trayHost') && mj.includes('backgroundThrottling: false') && mj.includes('disable-renderer-backgrounding'));
 ok('input channel high', ih.includes("createDataChannel('input'") && ih.includes("priority: 'high'") && vh.includes("e.channel.label === 'input'"));
@@ -44,6 +46,11 @@ ok('linux packages', (() => {
   return pj.includes('AppImage') && pj.includes('"deb"') && pj.includes('"rpm"') && pj.includes('build/amni-control') && require('fs').existsSync(require('path').join(__dirname, '..', 'scripts', 'install-linux.sh'));
 })());
 ok('linux install script', require('fs').readFileSync(require('path').join(__dirname, '..', 'scripts', 'install-linux.sh'), 'utf8').includes('--deb') && require('fs').readFileSync(require('path').join(__dirname, '..', 'scripts', 'install-linux.sh'), 'utf8').includes('AppImage'));
+const fitted = fitBox({ width: 3440, height: 1440 }, { width: 1920, height: 1080 });
+ok('1080p keeps ultrawide aspect', fitted.width === 1920 && fitted.height === 804);
+ok('source smaller than box stays native', fitBox({ width: 1280, height: 720 }, { width: 1920, height: 1080 }).width === 1280);
+ok('caps lock is a click not a hold', vh.includes("TOGGLE_KEYS") && /caps-click/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'rust', 'src', 'main.rs'), 'utf8')));
+ok('new viewer clears stuck mods', ih.includes("type: 'reset-mods'") && /reset-mods/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'rust', 'src', 'main.rs'), 'utf8')));
 ok('default source', /id="resolutionSelect"[\s\S]*value="source" selected/.test(ih));
 ok('default 60fps', /id="fpsSelect"[\s\S]*value="60" selected/.test(ih));
 ok('default 12mbps', ih.includes('value="12000"') && ih.includes('WAN_DEFAULT_KBPS = 12000'));

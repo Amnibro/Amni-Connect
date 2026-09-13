@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Amni-Connect &bull; E2EE Remote Desktop</title>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
         :root { --primary: #5A48B0; --primary-dark: #463890; --paper:#0A0B0E; --surface:#161a22; --you:#C89B4E; --ink:#eef1f6; --line:#2a3140; --mut:#9aa3b2; }
         * { box-sizing: border-box; }
         body { margin: 0; font-family: system-ui, Segoe UI, sans-serif; background: var(--paper); color: var(--ink); height: 100vh; overflow: hidden; }
@@ -98,6 +97,29 @@
         @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
         h2.section-head .live-pill { animation: pulse 2s ease-in-out infinite; }
         input[disabled], select[disabled] { opacity: 0.55; cursor: not-allowed; }
+        .main { display: grid; grid-template-columns: minmax(300px, 400px) minmax(320px, 1fr) minmax(280px, 420px); grid-template-rows: minmax(0, 1fr); gap: 16px; padding: 16px; flex: 1; min-height: 0; overflow: hidden; }
+        .card { background: var(--surface); border: 1px solid #334155; border-radius: 14px; padding: 18px; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; scrollbar-width: thin; scrollbar-color: #334155 transparent; }
+        .card::-webkit-scrollbar { width: 4px; }
+        .card::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        #cardLog .log { flex: 1; }
+        .main:has(#remoteScreen[style*="flex"]) { grid-template-columns: minmax(320px, 360px) 1fr; grid-template-rows: minmax(0, 1fr) 220px; }
+        .main:has(#remoteScreen[style*="flex"]) #cardStream { display: none; }
+        .main:has(#remoteScreen[style*="flex"]) #cardSession { grid-column: 1; grid-row: 1; }
+        .main:has(#remoteScreen[style*="flex"]) #cardLog { grid-column: 1; grid-row: 2; }
+        .main:has(#remoteScreen[style*="flex"]) #remoteScreen { grid-column: 2; grid-row: 1 / 3; }
+        @media (max-width: 1240px) { .main { grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr) 220px; } #cardLog { grid-column: 1 / 3; } }
+        @media (max-width: 840px) { .main { grid-template-columns: 1fr; grid-template-rows: auto auto 220px; overflow-y: auto; } #cardLog { grid-column: 1; } }
+        .pair-grid { display: grid; grid-template-columns: 150px 1fr; gap: 14px; align-items: start; margin-top: 4px; }
+        .pair-grid img, .remote-grid img { width: 150px; height: 150px; background: #fff; border-radius: 8px; padding: 6px; object-fit: contain; display: block; }
+        .pair-grid .pair-addr { margin: 0; }
+        .remote-grid { display: grid; grid-template-columns: 1fr 150px; gap: 14px; align-items: start; margin-top: 8px; }
+        .remote-grid button { margin-bottom: 8px; }
+        .device-list { font-size: 12px; line-height: 1.7; }
+        .device-list a { color: #fda4af; margin-left: 6px; }
+        .settings-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 18px; }
+        .settings-grid .setting-row { flex-direction: column; align-items: stretch; gap: 4px; }
+        .settings-grid .toggle-row { padding: 6px 0; border-bottom: 1px solid #1e293b; }
+        .settings-grid .toggle-row:nth-last-child(-n+2) { border-bottom: none; }
     </style>
 </head>
 <body>
@@ -108,43 +130,58 @@
             <div id="status" class="status">Disconnected</div>
         </header>
         <div class="main">
-            <div class="panel">
-                <div class="panel-scroll">
-                    <h2>&#128640; Session Control</h2>
-                    <div class="segmented" id="modeSwitch">
-                        <button class="seg-btn active" data-mode="host" onclick="setMode('host')">&#128640; Host</button>
-                        <button class="seg-btn" data-mode="join" onclick="setMode('join')">&#128279; Join</button>
-                    </div>
-                    <div id="hostMode">
-                        <input type="text" id="customRoomCode" placeholder="Optional: Persistent Room Code" style="text-transform:uppercase">
-                        <select id="monitorSelect" style="display:none"></select>
-                        <div class="mon-head"><span>Screen to share</span><button type="button" class="mon-refresh" id="monRefresh" onclick="loadSources(true)">&#8635; Refresh</button></div>
-                        <div class="mon-grid" id="monitorGrid"></div>
-                        <button onclick="userClickedHost=true; createAndHost()">&#128640; Start Hosting (Share Screen)</button>
-                    </div>
-                    <div id="viewerMode" style="display:none;">
-                        <input type="text" id="roomCodeInput" placeholder="Enter Room Code" maxlength="32" style="text-transform:uppercase">
-                        <button onclick="joinSession()">&#128279; Join Remote Session</button>
-                    </div>
-                    <div id="activeSession" style="display:none;">
-                        <div class="room-code" id="displayCode">———</div>
+            <section class="card" id="cardSession">
+                <h2>&#128640; Session Control</h2>
+                <div class="segmented" id="modeSwitch">
+                    <button class="seg-btn active" data-mode="host" onclick="setMode('host')">&#128640; Host</button>
+                    <button class="seg-btn" data-mode="join" onclick="setMode('join')">&#128279; Join</button>
+                </div>
+                <div id="hostMode">
+                    <input type="text" id="customRoomCode" placeholder="Optional: Persistent Room Code" style="text-transform:uppercase">
+                    <select id="monitorSelect" style="display:none"></select>
+                    <div class="mon-head"><span>Screen to share</span><button type="button" class="mon-refresh" id="monRefresh" onclick="loadSources(true)">&#8635; Refresh</button></div>
+                    <div class="mon-grid" id="monitorGrid"></div>
+                    <button onclick="userClickedHost=true; createAndHost()">&#128640; Start Hosting (Share Screen)</button>
+                </div>
+                <div id="viewerMode" style="display:none;">
+                    <input type="text" id="roomCodeInput" placeholder="Enter Room Code" maxlength="32" style="text-transform:uppercase">
+                    <button onclick="joinSession()">&#128279; Join Remote Session</button>
+                </div>
+                <div id="activeSession" style="display:none;">
+                    <div class="room-code" id="displayCode">———</div>
+                    <div class="pair-grid">
+                        <img id="pairQr" alt="Scan to join" style="display:none">
                         <div class="pair-addr">
                             <label for="pairHost">Pairing address</label>
                             <div class="pair-row">
                                 <input type="text" id="pairHost" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="detecting…">
-                                <button type="button" class="pair-reset" id="pairReset" title="Reset to the detected LAN address">&#8635;</button>
+                                <button type="button" class="pair-reset" id="pairReset" title="Reset to the detected address">&#8635;</button>
                             </div>
                             <div class="pair-hint" id="pairHint"></div>
+                            <div class="btn-row" style="margin-top:8px">
+                                <button class="success" onclick="copyCode()">&#128203; Code</button>
+                                <button class="info" onclick="copyLink()">&#128279; Link</button>
+                            </div>
                         </div>
-                        <img id="pairQr" alt="Scan to join" style="display:none;width:160px;height:160px;background:#fff;border-radius:8px;padding:6px;margin:8px auto;object-fit:contain">
-                        <div class="btn-row">
-                            <button class="success" onclick="copyCode()">&#128203; Code</button>
-                            <button class="info" onclick="copyLink()">&#128279; Link</button>
-                        </div>
-                        <button class="danger" onclick="endSession()">&#9940; End Session</button>
                     </div>
-
-                    <h2 class="section-head">&#9881;&#65039; Stream Settings <span id="liveSettingsPill" class="live-pill" style="display:none;">LIVE</span></h2>
+                    <div class="pair-addr" id="remotePanel" style="display:none">
+                        <label>Remote access</label>
+                        <div class="pair-hint" id="tunnelHint">tunnel: checking…</div>
+                        <div class="remote-grid">
+                            <div>
+                                <button class="info" type="button" onclick="enrollDevice()">&#128273; Enroll a device</button>
+                                <div class="pair-hint" id="enrollHint"></div>
+                                <div id="deviceList" class="device-list"></div>
+                            </div>
+                            <img id="enrollQr" alt="Scan to enroll" style="display:none">
+                        </div>
+                    </div>
+                    <button class="danger" onclick="endSession()">&#9940; End Session</button>
+                </div>
+            </section>
+            <section class="card" id="cardStream">
+                <h2>&#9881;&#65039; Stream Settings <span id="liveSettingsPill" class="live-pill" style="display:none;">LIVE</span></h2>
+                <div class="settings-grid">
                     <div class="setting-row">
                         <label>Resolution</label>
                         <select id="resolutionSelect" onchange="onUserStreamChange()">
@@ -164,12 +201,14 @@
                             <option value="15">15 fps</option>
                         </select>
                     </div>
-                    <div class="setting-row">
-                        <label>Bitrate</label>
-                        <input type="range" id="qualitySlider" min="500" max="20000" step="500" value="12000" oninput="onSliderInput()">
-                        <span class="quality-val" id="qualityLabel">12 Mbps</span>
-                    </div>
-                    <div id="autoHint" class="auto-hint">&#128640; Auto-adapting to network</div>
+                </div>
+                <div class="setting-row">
+                    <label>Bitrate</label>
+                    <input type="range" id="qualitySlider" min="500" max="20000" step="500" value="12000" oninput="onSliderInput()">
+                    <span class="quality-val" id="qualityLabel">12 Mbps</span>
+                </div>
+                <div id="autoHint" class="auto-hint">&#128640; Auto-adapting to network</div>
+                <div class="settings-grid">
                     <div class="toggle-row">
                         <label>Auto Bitrate <span style="font-size:10px;color:#64748b;font-weight:400;">(adapts to signal)</span></label>
                         <label class="toggle"><input type="checkbox" id="autoBitrateToggle" checked onchange="toggleAutoBitrate()"><span class="slider"></span></label>
@@ -184,31 +223,27 @@
                     </div>
                     <div class="toggle-row">
                         <label>View Only (this side)</label>
-                        <label class="toggle"><input type="checkbox" id="viewOnlyToggle"><span class="slider"></span></label>
+                        <label class="toggle"><input type="checkbox" id="viewOnlyToggle" onchange="paintInputGate()"><span class="slider"></span></label>
                     </div>
                     <div class="toggle-row">
                         <label>Tray while hosting <span style="font-size:10px;color:#64748b;font-weight:400;">(hides chrome)</span></label>
                         <label class="toggle"><input type="checkbox" id="trayToggle" onchange="onTrayToggle()"><span class="slider"></span></label>
                     </div>
-
-                    <h2 class="section-head">&#128202; Connection Stats</h2>
-                    <div class="stat-grid">
-                        <div class="stat-box"><div class="stat-label">Bitrate</div><div class="stat-val" id="statBitrate">—</div></div>
-                        <div class="stat-box"><div class="stat-label">FPS</div><div class="stat-val" id="statFps">—</div></div>
-                        <div class="stat-box"><div class="stat-label">Latency</div><div class="stat-val" id="statLatency">—</div></div>
-                        <div class="stat-box"><div class="stat-label">Loss</div><div class="stat-val" id="statLoss">—</div></div>
-                        <div class="stat-box"><div class="stat-label">Resolution</div><div class="stat-val" id="statRes">—</div></div>
-                        <div class="stat-box"><div class="stat-label">Signal</div><div class="stat-val signal-pill" id="statSignal"><span class="signal-dot" id="signalDot"></span><span id="signalText">—</span></div></div>
-                    </div>
                 </div>
-
-                <div class="v-resizer" id="panelResizer" role="separator" aria-orientation="horizontal" tabindex="0" title="Drag to resize. Double-click to reset."></div>
-
-                <div class="log-wrap">
-                    <h2 style="margin-top:4px;margin-bottom:8px;">&#128196; Connection Log</h2>
-                    <div id="log" class="log"></div>
+                <h2 class="section-head">&#128202; Connection Stats</h2>
+                <div class="stat-grid">
+                    <div class="stat-box"><div class="stat-label">Bitrate</div><div class="stat-val" id="statBitrate">—</div></div>
+                    <div class="stat-box"><div class="stat-label">FPS</div><div class="stat-val" id="statFps">—</div></div>
+                    <div class="stat-box"><div class="stat-label">Latency</div><div class="stat-val" id="statLatency">—</div></div>
+                    <div class="stat-box"><div class="stat-label">Loss</div><div class="stat-val" id="statLoss">—</div></div>
+                    <div class="stat-box"><div class="stat-label">Resolution</div><div class="stat-val" id="statRes">—</div></div>
+                    <div class="stat-box"><div class="stat-label">Signal</div><div class="stat-val signal-pill" id="statSignal"><span class="signal-dot" id="signalDot"></span><span id="signalText">—</span></div></div>
                 </div>
-            </div>
+            </section>
+            <section class="card" id="cardLog">
+                <h2>&#128196; Connection Log</h2>
+                <div id="log" class="log"></div>
+            </section>
             <div id="remoteScreen">
                 <video id="remoteVideo" autoplay playsinline></video>
                 <div class="overlay" id="inputOverlay" style="pointer-events:auto"></div>
@@ -219,7 +254,15 @@
     <script src="node_modules/socket.io-client/dist/socket.io.min.js"></script>
     <script>
         const SIGNALING_URL = 'http://localhost:3389';
-        const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
+        let ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
+        let iceHasTurn = false;
+        async function loadIce() {
+            try {
+                const r = await fetch(SIGNALING_URL + '/ice-servers', { cache: 'no-store' });
+                const j = await r.json();
+                if (Array.isArray(j.iceServers) && j.iceServers.length) { ICE_SERVERS = j.iceServers; iceHasTurn = !!j.turn; log(j.turn ? 'TURN relay available for off-network viewers' : 'No TURN relay configured (STUN only)'); }
+            } catch (e) {}
+        }
         let ourLan = '', peerLan = '';
         function rewriteLocal(cand, ip) {
             if (!cand || !ip) return null;
@@ -262,7 +305,15 @@
             const color = type === 'success' ? '#86efac' : type === 'error' ? '#fda4af' : '#e0f2fe';
             logEl.innerHTML += `<span style="color:${color}">[${new Date().toLocaleTimeString()}] ${msg}</span><br>`;
             logEl.scrollTop = logEl.scrollHeight;
+            window.electronAPI?.logLine?.(msg);
         }
+        const inCount = { move: 0, input: 0, clipboard: 0, relay: 0, moves: 0, stale: 0 };
+        setInterval(() => {
+            const total = inCount.move + inCount.input + inCount.clipboard + inCount.relay;
+            if (!total) return;
+            log(`input 5s: move-ch=${inCount.move} input-ch=${inCount.input} relay=${inCount.relay} moves=${inCount.moves} stale=${inCount.stale}` + (pc ? ` rtc=${pc.connectionState} ${AB.icePath || ''}` : ''));
+            Object.keys(inCount).forEach(k => inCount[k] = 0);
+        }, 5000);
 
         function setStatus(text, color = '#64748b') {
             statusEl.textContent = text;
@@ -277,7 +328,7 @@
 
         const AB = { enabled: true, lastLoss: 0, lastRtt: 0, lastAvail: 0, lastQlim: 'none', priorPacketsLost: 0, priorPacketsRcvd: 0, lan: false, icePath: '', userTouched: false, lanApplied: false };
         const LAN_FLOOR_KBPS = 16000, WAN_DEFAULT_KBPS = 12000, SCREEN_CHUNK = 60000;
-        let hwPath = false, screenChannel = null, inputChannel = null, hwSeq = 0, hwStash = [];
+        let hwPath = false, screenChannel = null, inputChannel = null, moveChannel = null, lastMoveSeq = 0, joinSeq = 0, hwSeq = 0, hwStash = [];
         let userClickedHost = false;
         function pasteChord() {
             return [
@@ -294,8 +345,17 @@
             pasteChord().forEach(ev => window.electronAPI.sendInputEvent(ev));
             log('Pasted from viewer (' + text.length + ' chars)');
         }
+        // Absolute moves carry a viewer sequence number; the `move` channel is unordered, so a
+        // late packet must not drag the cursor back. A restart (viewer reload) resets the counter.
+        function staleMove(seq) {
+            if (typeof seq !== 'number') return false;
+            if (seq <= lastMoveSeq && lastMoveSeq - seq < 10000) return true;
+            lastMoveSeq = seq;
+            return false;
+        }
         function applyViewerMsg(data) {
             if (data.type === 'input') {
+                if (data.ev && data.ev.type === 'mouse-move') { inCount.moves++; if (staleMove(data.seq)) { inCount.stale++; return; } }
                 if (isHost && !inputLocked && !document.getElementById('viewOnlyToggle').checked) window.electronAPI.sendInputEvent(data.ev);
                 return;
             }
@@ -452,11 +512,27 @@
             applyLanProfile();
         }
 
+        function selectedSourceSize() {
+            const sourceId = document.getElementById('monitorSelect') && document.getElementById('monitorSelect').value;
+            const src = availableSources.find(s => s.id === sourceId) || availableSources[0];
+            if (src && src.width && src.height) return { width: src.width, height: src.height };
+            const vt = localStream && localStream.getVideoTracks()[0];
+            const st = vt && vt.getSettings && vt.getSettings();
+            if (st && st.width && st.height) return { width: st.width, height: st.height };
+            return null;
+        }
+        function fitBox(src, box) {
+            if (!box) return null;
+            if (!src || !src.width || !src.height) return box;
+            const k = Math.min(box.width / src.width, box.height / src.height, 1);
+            return { width: Math.max(2, Math.round(src.width * k / 2) * 2), height: Math.max(2, Math.round(src.height * k / 2) * 2) };
+        }
+        function fitCaptureRes(box) { return fitBox(selectedSourceSize(), box); }
         function getResolution() {
             const v = document.getElementById('resolutionSelect').value;
             if (v === 'source') return null;
             const [w, h] = v.split('x').map(Number);
-            return { width: w, height: h };
+            return fitCaptureRes({ width: w, height: h });
         }
 
         async function applyStreamSettings() {
@@ -503,8 +579,12 @@
             localStorage.setItem('amni-tray-host', on ? '1' : '0');
         }
 
+        function paintInputGate() {
+            try { window.electronAPI.setInputGate({ locked: inputLocked, viewOnly: document.getElementById('viewOnlyToggle').checked }); } catch (_) {}
+        }
         function toggleInputLock() {
             inputLocked = document.getElementById('lockInputToggle').checked;
+            paintInputGate();
             log(inputLocked ? 'Viewer input locked' : 'Viewer input unlocked');
         }
 
@@ -512,10 +592,17 @@
             socket = io(SIGNALING_URL, { transports: ['websocket','polling'] });
             socket.on('connect', () => {
                 log('Signaling server connected', 'success');
+                loadIce();
                 paintHostChips();
                 if (isHost && roomId) { socket.emit('create-room', roomId); log(`Reclaimed room ${roomId} after reconnect`, 'success'); }
             });
+            if (!socket._roomPulse) {
+              socket._roomPulse = setInterval(() => {
+                if (isHost && roomId && socket.connected) socket.emit('create-room', roomId);
+              }, 10000);
+            }
             socket.on('connect_error', () => log('Cannot reach signaling server — is it running?', 'error'));
+            socket.on('disconnect', () => paintHostChips());
             socket.on('offer', async ({ offer }) => {
                 if (!pc) createPC();
                 await setRemoteMunged(offer);
@@ -532,9 +619,23 @@
             socket.on('peer-lan', (ip) => { peerLan = ip || peerLan; });
             socket.on('ice-candidate', ({ candidate }) => addIce(candidate));
             socket.on('host-disconnected', () => { log('Host disconnected', 'error'); setStatus('Disconnected', '#ef4444'); });
+            socket.on('viewer-joined', async (viewerId) => {
+                if (!isHost || !roomId) return;
+                const live = pc && (pc.connectionState === 'connected' || pc.connectionState === 'connecting');
+                if (live && viewerId && viewerId === lastViewerId) {
+                    log('Viewer re-joined signaling — keeping live WebRTC');
+                    return;
+                }
+                lastViewerId = viewerId || '';
+                try { window.electronAPI.sendInputEvent({ type: 'reset-mods' }); } catch (_) {}
+                log('Viewer joined — sending offer');
+                createPC();
+                const offer = await setLocalMunged(await pc.createOffer());
+                socket.emit('offer', { roomId, offer });
+            });
         }
 
-        let dataChannel, hostIceTries = 0, hostRecoverBusy = false;
+        let dataChannel, hostIceTries = 0, hostRecoverBusy = false, lastViewerId = '';
         function paintHostChips() {
             const sig = document.getElementById('chipSig');
             const rtc = document.getElementById('chipRtc');
@@ -559,6 +660,8 @@
             finally { hostRecoverBusy = false; paintHostChips(); }
         }
         function createPC() {
+            try { pc?.close(); } catch (_) {}
+            hostIceTries = 0;
             pc = new RTCPeerConnection({ iceServers: ICE_SERVERS, iceCandidatePoolSize: 4 });
             pc.onicecandidate = ({ candidate }) => emitIce(candidate);
             pc.onconnectionstatechange = () => {
@@ -576,6 +679,8 @@
             if (isHost) {
                 inputChannel = pc.createDataChannel('input', { ordered: true, priority: 'high' });
                 setupDataChannel(inputChannel);
+                moveChannel = pc.createDataChannel('move', { ordered: false, maxRetransmits: 0, priority: 'high' });
+                setupDataChannel(moveChannel);
                 dataChannel = pc.createDataChannel('clipboard', { ordered: true });
                 setupDataChannel(dataChannel);
                 setupScreenChannel(pc.createDataChannel('screen', { ordered: false, maxRetransmits: 0, priority: 'low' }));
@@ -583,6 +688,7 @@
                 pc.ondatachannel = (e) => {
                     if (e.channel.label === 'screen') setupScreenChannel(e.channel);
                     else if (e.channel.label === 'input') { inputChannel = e.channel; setupDataChannel(inputChannel); }
+                    else if (e.channel.label === 'move') { moveChannel = e.channel; }
                     else { dataChannel = e.channel; setupDataChannel(dataChannel); }
                 };
             }
@@ -592,8 +698,9 @@
         }
 
         function setupDataChannel(channel) {
-            channel.onopen = () => { log('E2EE Data channel opened'); applyBitrate(); paintHostChips(); hostIceTries = 0; };
+            channel.onopen = () => { lastMoveSeq = 0; log('E2EE Data channel opened (' + channel.label + ')'); applyBitrate(); paintHostChips(); hostIceTries = 0; };
             channel.onmessage = async (e) => {
+                inCount[channel.label] !== undefined && inCount[channel.label]++;
                 if (typeof e.data !== 'string') return;
                 try { applyViewerMsg(JSON.parse(e.data)); } catch (err) {}
             };
@@ -825,15 +932,7 @@
                     const hid = await window.electronAPI.hideToTray('Hosting ' + roomId);
                     if (hid && hid.status === 'hidden') log('Hosting in tray — click the Amni-Connect icon to show the window');
                 }
-                socket.on('viewer-joined', async () => {
-                    log('Viewer joined — sending offer');
-                    createPC();
-                    const offer = await setLocalMunged(await pc.createOffer());
-                    socket.emit('offer', { roomId, offer });
-                });
-                socket.on('input-event', (data) => {
-                    if (!inputLocked && !document.getElementById('viewOnlyToggle').checked) window.electronAPI.sendInputEvent(data);
-                });
+                socket.on('input-event', (data) => { inCount.relay++; });
                 socket.on('file-received', (data) => {
                     log(`Received file: ${data.name} (${(data.size / 1024).toFixed(1)} KB)`, 'success');
                 });
@@ -875,7 +974,10 @@
         // reverse proxy on 443 does not get a stray :3389 glued on.
         function parsePairTarget() {
             const el = document.getElementById('pairHost');
-            let raw = ((el && el.value) || '').trim() || detectedIp || 'localhost';
+            return parsePairTargetOf(((el && el.value) || '').trim());
+        }
+        function parsePairTargetOf(value) {
+            let raw = (value || '').trim() || detectedIp || 'localhost';
             raw = raw.replace(/\/+$/, '');
             let proto = 'http';
             const m = raw.match(/^(https?):\/\/(.+)$/i);
@@ -923,12 +1025,54 @@
             paintPairQr();
         }
 
+        let tunnelHost = '', enrollTimer = null;
+        async function authStatus() { try { return await (await fetch(SIGNALING_URL + '/auth/status', { cache: 'no-store' })).json(); } catch (_) { return { enabled: false }; } }
+        async function paintDevices() {
+            const box = document.getElementById('deviceList');
+            if (!box) return;
+            try {
+                const { devices } = await (await fetch(SIGNALING_URL + '/auth/devices', { cache: 'no-store' })).json();
+                box.innerHTML = devices.length ? devices.map(d => `<div>&#128241; ${d.name} <span style="opacity:.6">${(d.lastUsed || d.createdAt || '').slice(0, 10)}</span> <a href="#" data-id="${d.id}" style="color:#fda4af">remove</a></div>`).join('') : '<div style="opacity:.7">No devices enrolled yet. Rooms opened through the tunnel need a passkey.</div>';
+                box.querySelectorAll('a[data-id]').forEach(a => a.onclick = async (e) => { e.preventDefault(); await fetch(SIGNALING_URL + '/auth/devices/' + a.dataset.id, { method: 'DELETE' }); paintDevices(); });
+            } catch (_) {}
+        }
+        async function enrollDevice() {
+            const img = document.getElementById('enrollQr'), hint = document.getElementById('enrollHint');
+            try {
+                const r = await (await fetch(SIGNALING_URL + '/auth/enroll-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: roomId || '' }) })).json();
+                if (r.error) throw new Error(r.error);
+                img.src = SIGNALING_URL + '/qr?url=' + encodeURIComponent(r.url); img.style.display = '';
+                clearInterval(enrollTimer);
+                enrollTimer = setInterval(() => { const s = Math.max(0, Math.round((r.exp - Date.now()) / 1000)); hint.textContent = s ? `Scan on the phone, then create the passkey. Link expires in ${s}s.` : 'Enrollment link expired.'; if (!s) { clearInterval(enrollTimer); img.style.display = 'none'; } paintDevices(); }, 1000);
+                log('Enrollment link ready: ' + r.url, 'success');
+            } catch (e) { hint.textContent = e.message || String(e); }
+        }
+        async function paintRemotePanel() {
+            const s = await authStatus();
+            const panel = document.getElementById('remotePanel'), hint = document.getElementById('tunnelHint');
+            if (!panel) return;
+            panel.style.display = (s.enabled && s.required) ? '' : 'none';
+            if (!s.enabled || !s.required) return;
+            tunnelHost = s.hostname;
+            hint.textContent = `https://${s.hostname} · ${s.devices} device${s.devices === 1 ? '' : 's'} enrolled`;
+            paintDevices();
+        }
         (async function initPairHost() {
             try { detectedIp = await window.electronAPI.getLocalIp(); } catch (_) { detectedIp = 'localhost'; }
+            const s = await authStatus();
+            if (s.enabled && s.hostname) detectedIp = 'https://' + s.hostname;
+            paintRemotePanel();
             const el = document.getElementById('pairHost');
             if (!el) return;
             el.placeholder = detectedIp;
-            const saved = (localStorage.getItem(PAIR_KEY) || '').trim();
+            let saved = (localStorage.getItem(PAIR_KEY) || '').trim();
+            // A saved LAN/meshnet address silently outranked the tunnel, so the QR and Link
+            // handed out an address nobody off this network can reach. The tunnel wins.
+            if (s.enabled && s.hostname && saved && isPrivateAddr(parsePairTargetOf(saved).host)) {
+                log('Pairing address ' + saved + ' is only reachable on your own network — using the tunnel instead');
+                saved = '';
+                localStorage.removeItem(PAIR_KEY);
+            }
             el.value = saved || detectedIp;
             let debounce = null;
             el.addEventListener('input', () => {
@@ -955,8 +1099,10 @@
 
         const overlay = document.getElementById('inputOverlay');
         const joinCtl = () => !isHost && roomId && !document.getElementById('viewOnlyToggle').checked;
-        const sendIn = (ev) => {
-            if (inputChannel && inputChannel.readyState === 'open') { try { inputChannel.send(JSON.stringify({ type: 'input', ev })); return; } catch (e) {} }
+        const sendIn = (ev, reliable) => {
+            const seq = ev.type === 'mouse-move' ? ++joinSeq : undefined;
+            if (seq && !reliable && moveChannel && moveChannel.readyState === 'open') { try { moveChannel.send(JSON.stringify({ type: 'input', ev, seq })); return; } catch (e) {} }
+            if (inputChannel && inputChannel.readyState === 'open') { try { inputChannel.send(JSON.stringify({ type: 'input', ev, seq })); return; } catch (e) {} }
             if (dataChannel && dataChannel.readyState === 'open') { try { dataChannel.send(JSON.stringify({ type: 'input', ev })); return; } catch (e) {} }
             if (socket && socket.connected && roomId) { socket.emit('input-event', { ...ev, roomId }); return; }
         };
@@ -971,7 +1117,7 @@
         overlay.addEventListener('mousedown', (e) => {
             if (!joinCtl()) return;
             e.preventDefault();
-            const sc = joinCoord(e); sendIn({ type: 'mouse-move', x: sc.x, y: sc.y });
+            const sc = joinCoord(e); sendIn({ type: 'mouse-move', x: sc.x, y: sc.y }, true);
             e.button === 2 ? sendIn({ type: 'mouse-right-click' }) : e.button === 1 ? sendIn({ type: 'mouse-middle-click' }) : (joinHeld = true, sendIn({ type: 'mouse-down' }));
         });
         const joinEndMouse = () => { if (joinHeld) { joinHeld = false; sendIn({ type: 'mouse-up' }); } };

@@ -1,3 +1,4 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
 mod wire;
 #[cfg(windows)]
 mod capture;
@@ -37,6 +38,27 @@ fn make_dpi_aware() -> bool {
 }
 #[cfg(not(windows))]
 fn make_dpi_aware() -> bool {
+    true
+}
+#[cfg(windows)]
+fn is_elevated() -> bool {
+    use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    use windows::Win32::Foundation::HANDLE;
+    unsafe {
+        let mut tok = HANDLE::default();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut tok).is_err() {
+            return false;
+        }
+        let mut el = TOKEN_ELEVATION::default();
+        let mut len = 0u32;
+        let ok = GetTokenInformation(tok, TokenElevation, Some(&mut el as *mut _ as *mut _), std::mem::size_of::<TOKEN_ELEVATION>() as u32, &mut len).is_ok();
+        let _ = windows::Win32::Foundation::CloseHandle(tok);
+        ok && el.TokenIsElevated != 0
+    }
+}
+#[cfg(not(windows))]
+fn is_elevated() -> bool {
     true
 }
 #[cfg(windows)]
@@ -214,16 +236,21 @@ impl Ctl {
     }
     fn status(&self) -> String {
         format!(
-            "{{\"type\":\"pong\",\"errs\":{},\"rebuilds\":{},\"misses\":{},\"direct\":{},\"display\":[{},{}],\"last\":{}}}\n",
+            "{{\"type\":\"pong\",\"errs\":{},\"rebuilds\":{},\"misses\":{},\"direct\":{},\"elevated\":{},\"display\":[{},{}],\"last\":{}}}\n",
             self.errs,
             self.rebuilds,
             self.misses,
             self.direct,
+            is_elevated(),
             self.sw,
             self.sh,
             serde_json::to_string(&self.last).unwrap_or_else(|_| String::from("\"\""))
         )
     }
+}
+#[cfg(windows)]
+fn caps_on() -> bool {
+    unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState(0x14) as u16 & 1 == 1 }
 }
 fn lock_ctl(m: &Arc<Mutex<Ctl>>) -> MutexGuard<'_, Ctl> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -232,8 +259,31 @@ fn apply(c: &mut Ctl, ev: &InputEvent) -> Option<String> {
     if ev.event_type == "ping" {
         return Some(c.status());
     }
+    if ev.event_type == "mouse-move" || ev.event_type == "mouse-move-rel" {
+        if let Ok((sw, sh)) = c.eng.main_display() {
+            if sw > 0 && sh > 0 {
+                c.sw = sw;
+                c.sh = sh;
+            }
+        }
+    }
     let (sw, sh) = (c.sw as f64, c.sh as f64);
     match ev.event_type.as_str() {
+        "reset-mods" => {
+            if c.shift_held || c.auto_shift {
+                c.shift(false, "reset-shift");
+                c.shift_held = false;
+                c.auto_shift = false;
+            }
+            for k in [Key::Control, Key::Alt, Key::Meta] {
+                let _ = c.eng.key(k, Direction::Release);
+            }
+            #[cfg(windows)]
+            if caps_on() {
+                let r = c.eng.key(Key::CapsLock, Direction::Click);
+                c.note("caps-clear", r);
+            }
+        }
         "mouse-move" => {
             if let (Some(x), Some(y)) = (ev.x, ev.y) {
                 c.move_to((x * sw) as i32, (y * sh) as i32);
@@ -285,6 +335,12 @@ fn apply(c: &mut Ctl, ev: &InputEvent) -> Option<String> {
             let down = ev.event_type == "key-down";
             let raw = ev.key.as_deref().unwrap_or("");
             let mapped = ev.key.as_deref().and_then(key_from_str).or_else(|| ev.code.as_deref().and_then(key_from_str));
+            if matches!(mapped, Some(Key::CapsLock)) {
+                if down {
+                    let r = c.eng.key(Key::CapsLock, Direction::Click);
+                    c.note("caps-click", r);
+                }
+            } else {
             if matches!(mapped, Some(Key::Shift)) {
                 c.shift_held = down;
                 c.auto_shift = false;
@@ -304,6 +360,7 @@ fn apply(c: &mut Ctl, ev: &InputEvent) -> Option<String> {
                     }
                 }
                 None => eprintln!("[amni-control] unmapped {} key={:?} code={:?}", ev.event_type, ev.key, ev.code),
+            }
             }
         }
         _ => {}
@@ -343,8 +400,31 @@ fn spawn_watchdog(ctl: Arc<Mutex<Ctl>>) {
         }
     });
 }
+#[cfg(windows)]
+fn detach_console_and_log() {
+    use std::fs::OpenOptions;
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Console::{FreeConsole, SetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE};
+    unsafe { let _ = FreeConsole(); }
+    let Some(appdata) = std::env::var_os("APPDATA") else { return };
+    let mut p = std::path::PathBuf::from(appdata);
+    p.push("amni-connect");
+    let _ = std::fs::create_dir_all(&p);
+    p.push("amni-control.log");
+    let Ok(f) = OpenOptions::new().create(true).append(true).open(&p) else { return };
+    let h = HANDLE(f.as_raw_handle() as isize);
+    unsafe {
+        let _ = SetStdHandle(STD_ERROR_HANDLE, h);
+        let _ = SetStdHandle(STD_OUTPUT_HANDLE, h);
+    }
+    std::mem::forget(f);
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(windows)]
+    detach_console_and_log();
     env_logger::Builder::new().filter_level(log::LevelFilter::Error).parse_default_env().init();
     let dpi = make_dpi_aware();
     let ctl = Arc::new(Mutex::new(Ctl::new()?));

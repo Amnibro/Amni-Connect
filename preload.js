@@ -2,8 +2,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   getLocalIp: () => ipcRenderer.invoke('get-local-ip'),
+  logLine: (msg) => ipcRenderer.send('renderer-log', String(msg)),
   getSources: () => ipcRenderer.invoke('get-sources'),
   sendInputEvent: (event) => { ipcRenderer.send('send-input-event', event); },
+  setInputGate: (g) => { ipcRenderer.send('input-gate', g); },
   ackHwFrame: () => ipcRenderer.send('hw-frame-ack'),
   onStatusUpdate: (callback) => ipcRenderer.on('status-update', (_, msg) => callback(msg)),
   readClipboard: () => ipcRenderer.invoke('read-clipboard'),
