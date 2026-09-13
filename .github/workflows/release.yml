@@ -123,9 +123,12 @@ jobs:
           [ -n "$deb" ] && cp "$deb" aliases/Amni-Connect.deb
           rpm=$(find artifacts -type f -name "Amni-Connect-${ver}.rpm" | head -n1 || true)
           [ -n "$rpm" ] && cp "$rpm" aliases/Amni-Connect.rpm
-          mapfile -t aliases < <(find aliases -type f | sort)
-          files+=("${aliases[@]}")
-          notes=$(cat <<EOF)
+          extra=()
+          for f in aliases/Amni-Connect-Setup.exe aliases/Amni-Connect.AppImage aliases/Amni-Connect.deb aliases/Amni-Connect.rpm; do
+            [ -f "$f" ] && extra+=("$f")
+          done
+          files+=("${extra[@]}")
+          notes=$(cat <<NOTES)
           ## Download
 
           **Windows:** [Amni-Connect-Setup-${ver}.exe](https://github.com/Amnibro/Amni-Connect/releases/download/${tag}/Amni-Connect-Setup-${ver}.exe)
@@ -141,7 +144,7 @@ jobs:
           \`\`\`
 
           Viewer stays in any browser. Packaged hosts update from this Releases feed.
-          EOF
+          NOTES
           )
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "${files[@]}" --clobber
