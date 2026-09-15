@@ -33,14 +33,26 @@ app.use(express.json({ limit: '64kb' }));
 auth.routes(app);
 const gate = (req, res, next) => auth.allowed(req.headers) ? next() : res.status(401).json({ error: 'passkey required', authRequired: true });
 app.use('/socket.io-client', express.static(path.join(__dirname, 'node_modules', 'socket.io-client', 'dist')));
-app.get('/viewer', (_, res) => {
+// sendFile streams through Electron's asar overlay, which copies the page to
+// %TEMP%\{uuid}.tmp.html and then open()s that copy. Windows Storage Sense and
+// the NSIS installer both wipe Temp; the public viewer then returns ENOENT
+// instead of the page. readFile stays inside asar and never touches Temp.
+const VIEWER_PATH = path.join(__dirname, 'viewer.html');
+let viewerBuf;
+try { viewerBuf = fs.readFileSync(VIEWER_PATH); } catch (e) { console.error('[amni-connect] viewer.html', e); }
+function sendViewer(_req, res) {
+  try { if (!viewerBuf) viewerBuf = fs.readFileSync(VIEWER_PATH); }
+  catch (e) { return res.status(500).type('txt').send('viewer missing: ' + (e && e.message)); }
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.set('CDN-Cache-Control', 'no-store');
   res.set('Cloudflare-CDN-Cache-Control', 'no-store');
   res.set('Pragma', 'no-cache');
   res.set('Expires', '0');
-  res.sendFile(path.join(__dirname, 'viewer.html'));
-});
+  res.set('Content-Type', 'text/html; charset=UTF-8');
+  res.send(viewerBuf);
+}
+app.get('/', sendViewer);
+app.get('/viewer', sendViewer);
 app.get('/health', (_, res) => res.json({ status: 'ok', port: PORT }));
 app.get('/qr', async (req, res) => {
   const url = String(req.query.url || '');

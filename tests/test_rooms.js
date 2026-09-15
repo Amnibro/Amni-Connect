@@ -15,6 +15,8 @@ ok('last room code is persisted', /room\.json/.test(serverJs) && /loadStickyRoom
 ok('host republishes the room on a timer', /_roomPulse/.test(indexHtml));
 ok('a new viewer still gets an offer while another pc is live', /lastViewerId/.test(indexHtml) && /viewerId === lastViewerId/.test(indexHtml));
 ok('viewer sanitizes room code', viewerHtml.includes(".replace(/\\s+/g, '-')") && viewerHtml.includes(".replace(/[^A-Z0-9-]/g, '')"));
+ok('viewer is read from asar, not sendFile-to-Temp', /readFileSync\(VIEWER_PATH\)/.test(serverJs) && !/sendFile\(path\.join\(__dirname, 'viewer\.html'\)/.test(serverJs));
+ok('bare / also serves the viewer', /app\.get\('\/',\s*sendViewer\)/.test(serverJs) && /app\.get\('\/viewer',\s*sendViewer\)/.test(serverJs));
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'amni-rooms-'));
 fs.mkdirSync(path.join(tmp, 'amni-connect'), { recursive: true });
@@ -23,7 +25,7 @@ fs.writeFileSync(path.join(tmp, 'amni-connect', 'tunnel.json'), JSON.stringify({
 const PORT = 33994;
 const child = spawn(process.execPath, [path.join(root, 'server.js')], { env: { ...process.env, PORT: String(PORT), APPDATA: tmp, ALLOWED_ORIGINS: '*' }, stdio: ['ignore', 'pipe', 'pipe'] });
 const req = (method, p, headers = {}) => new Promise((resolve, reject) => {
-  const r = http.request({ host: '127.0.0.1', port: PORT, path: p, method, headers }, (res) => { let b = ''; res.on('data', d => b += d); res.on('end', () => { let j = null; try { j = JSON.parse(b); } catch (_) {} resolve({ status: res.statusCode, json: j }); }); });
+  const r = http.request({ host: '127.0.0.1', port: PORT, path: p, method, headers }, (res) => { let b = ''; res.on('data', d => b += d); res.on('end', () => { let j = null; try { j = JSON.parse(b); } catch (_) {} resolve({ status: res.statusCode, json: j, body: b }); }); });
   r.on('error', reject); r.end();
 });
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
@@ -32,6 +34,10 @@ const sock = (extra = {}) => io(`http://127.0.0.1:${PORT}`, { transports: ['webs
   let up = false;
   for (let i = 0; i < 40 && !up; i++) { await wait(200); try { up = (await req('GET', '/health')).status === 200; } catch (_) {} }
   ok('test server up', up);
+  const viewerPage = await req('GET', '/viewer');
+  ok('GET /viewer is the real page', viewerPage.status === 200 && /Amni-Connect Viewer/.test(viewerPage.body) && !/ENOENT/.test(viewerPage.body));
+  const rootPage = await req('GET', '/');
+  ok('GET / is the real page', rootPage.status === 200 && /Amni-Connect Viewer/.test(rootPage.body) && !/ENOENT/.test(rootPage.body));
   const listed = (await req('GET', '/rooms')).json;
   ok('sticky room exists before any host connects', listed && listed.rooms && listed.rooms.some(r => r.id === 'ANTMAN-PC' && r.host === false));
   const early = await new Promise((resolve) => {

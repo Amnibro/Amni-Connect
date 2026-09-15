@@ -11,6 +11,7 @@ rust/Cargo.lock
 .env.*
 *.pem
 *.key
+auth-secret
 
 # Electron build output
 dist/

@@ -1,5 +1,10 @@
 # Amni-Connect Changelog
 
+## v1.6.10 — viewer no longer dies on a missing Temp html file (2026-09-15)
+
+### Fixed
+- **`GET /viewer` returned `ENOENT: ... Temp\{uuid}.tmp.html`.** Packaged Electron `sendFile` extracts `viewer.html` out of `app.asar` into `%TEMP%` and then opens that copy. The copy is gone (installer leftover cleanup, Storage Sense, or an RDP session temp dir) and Express rendered the Node error as the page. The viewer is now `readFile`'d once from asar and sent as a buffer, so Temp is never involved. `GET /` serves the same page, so `connect.amni-scient.com` is no longer `Cannot GET /`.
+
 ## v1.6.9 — host window no longer paints white (2026-09-12)
 
 ### Fixed
