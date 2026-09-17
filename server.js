@@ -32,14 +32,25 @@ const auth = require('./auth').createAuth(DATA_ROOT);
 app.use(express.json({ limit: '64kb' }));
 auth.routes(app);
 const gate = (req, res, next) => auth.allowed(req.headers) ? next() : res.status(401).json({ error: 'passkey required', authRequired: true });
-app.use('/socket.io-client', express.static(path.join(__dirname, 'node_modules', 'socket.io-client', 'dist')));
+const assets = new Map();
+const asset = (rel) => assets.get(rel) || fs.readFileSync(path.join(__dirname, rel));
+const SIO_DIR = path.join('node_modules', 'socket.io-client', 'dist');
+app.get('/socket.io-client/:file', (req, res) => {
+  const file = path.basename(String(req.params.file || ''));
+  if (!/^[\w.-]+\.(js|map)$/.test(file)) return res.status(404).end();
+  try {
+    res.type(file.endsWith('.map') ? 'application/json' : 'application/javascript').send(asset(path.join(SIO_DIR, file)));
+  } catch (_) { res.status(404).end(); }
+});
 app.get('/viewer', (_, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.set('CDN-Cache-Control', 'no-store');
   res.set('Cloudflare-CDN-Cache-Control', 'no-store');
   res.set('Pragma', 'no-cache');
   res.set('Expires', '0');
-  res.sendFile(path.join(__dirname, 'viewer.html'));
+  try {
+    res.type('html').send(asset('viewer.html'));
+  } catch (e) { res.status(500).type('text').send('viewer.html unreadable: ' + (e && e.message)); }
 });
 app.get('/health', (_, res) => res.json({ status: 'ok', port: PORT }));
 app.get('/qr', async (req, res) => {

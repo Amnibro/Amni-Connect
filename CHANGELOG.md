@@ -1,5 +1,13 @@
 # Amni-Connect Changelog
 
+## v1.6.11 - the phone viewer no longer 404s after Windows cleans Temp (2026-09-17)
+
+### Fixed
+- **The phone got `Error: ENOENT ... \Temp\<guid>.tmp.html` instead of the viewer.** `/viewer` answered with `res.sendFile` on a path inside `app.asar`. sendFile needs a real file on disk, so Electron copied `viewer.html` out to `%TEMP%\<uuid>.tmp.html` once at startup and kept handing back that path. Windows temp cleanup deleted the copy, and every request after that answered 404 with the ENOENT text, while `/health` and `/qr` kept working because they never touch a file. The route now reads the page with `fs` (which reads straight out of the asar) and sends it from memory, so no temp copy exists to lose. The socket.io client is served the same way, by basename only, so it cannot rot the same way or walk out of its folder.
+
+### Tests
+- `tests/test_viewer_from_asar.js` boots the real signaling server, checks `/viewer` returns viewer.html with no ENOENT, checks the socket.io client still loads, refuses `..` paths, and proves the old `res.sendFile` line still reproduces the phone's 404.
+
 ## v1.6.9 — host window no longer paints white (2026-09-12)
 
 ### Fixed
