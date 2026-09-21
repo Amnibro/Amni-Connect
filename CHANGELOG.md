@@ -1,5 +1,11 @@
 # Amni-Connect Changelog
 
+## v1.6.12 — see who is in the session, and boot them (2026-09-17)
+
+### Added
+- **Host occupancy.** The session card and the `empty` / `1 in` header chip update when a viewer joins or leaves. The tray tooltip follows (`Hosting CODE · 1 in session`) and grows a Boot item while someone is on.
+- **Boot.** Host-only `kick-viewer` drops that socket, tells the phone `kicked`, and leaves the room up. The phone goes back to the connect card and does not auto-rejoin. A second phone still waiting gets an offer after the first is booted.
+
 ## v1.6.11 - the phone viewer no longer 404s after Windows cleans Temp (2026-09-17)
 
 ### Fixed

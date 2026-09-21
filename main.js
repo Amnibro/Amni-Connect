@@ -53,6 +53,7 @@ let helloWait = null;
 let hwPending = false;
 let tray = null;
 let trayHost = false;
+let trayOccupancy = 0;
 let quitting = false;
 const RUST_PORT = 7878;
 const VIDEO_PORT = 7879;
@@ -82,14 +83,17 @@ function trayIcon() {
 function rebuildTrayMenu(label) {
   if (!tray) return;
   tray.setToolTip(label || 'Amni-Connect');
-  tray.setContextMenu(Menu.buildFromTemplate([
+  const items = [
     { label: label || 'Amni-Connect', enabled: false },
     { type: 'separator' },
-    { label: 'Show', click: () => showWindow() },
-    { label: 'End session', click: () => mainWindow?.webContents.send('tray-end-session') },
-    { type: 'separator' },
-    { label: 'Quit', click: () => { quitting = true; trayHost = false; app.quit(); } }
-  ]));
+    { label: 'Show', click: () => showWindow() }
+  ];
+  if (trayOccupancy > 0) {
+    items.push({ label: trayOccupancy === 1 ? 'Boot viewer' : 'Boot ' + trayOccupancy + ' viewers', click: () => mainWindow?.webContents.send('tray-boot-viewer') });
+  }
+  if (trayHost) items.push({ label: 'End session', click: () => mainWindow?.webContents.send('tray-end-session') });
+  items.push({ type: 'separator' }, { label: 'Quit', click: () => { quitting = true; trayHost = false; app.quit(); } });
+  tray.setContextMenu(Menu.buildFromTemplate(items));
 }
 function ensureTray(label) {
   if (!tray) {
@@ -556,9 +560,15 @@ ipcMain.handle('hide-to-tray', (_, label) => {
 });
 ipcMain.handle('set-tray-host', (_, on, label) => {
   trayHost = !!on;
+  if (!on) trayOccupancy = 0;
   if (on) ensureTray(label || 'Amni-Connect · hosting');
   else if (tray) rebuildTrayMenu('Amni-Connect');
   return { status: trayHost ? 'tray' : 'window' };
+});
+ipcMain.handle('set-session-occupancy', (_, n, label) => {
+  trayOccupancy = Number(n) || 0;
+  if (trayHost || tray) rebuildTrayMenu(label || (trayOccupancy ? 'Amni-Connect · in session' : 'Amni-Connect'));
+  return { status: 'ok', n: trayOccupancy };
 });
 ipcMain.handle('show-window', () => { showWindow(); return { status: 'shown' }; });
 

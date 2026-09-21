@@ -1,6 +1,6 @@
 {
   "name": "amni-connect",
-  "version": "1.6.11",
+  "version": "1.6.12",
   "description": "End-to-end encrypted Rust + Electron remote desktop",
   "main": "main.js",
   "scripts": {

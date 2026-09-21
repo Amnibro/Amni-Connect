@@ -1,5 +1,11 @@
 # Amni-Connect Architecture Map
 
+## 2026-09-17 v1.6.12 session occupancy + boot
+
+- **`server.js`:** `viewerInfo` / `session-viewers` / `viewer-left`. Host-only `kick-viewer` emits `kicked` then disconnects. `GET /rooms` (loopback) now includes `people`.
+- **`index.html`:** `#sessionPeople` + `#chipWho`. `bootViewer` / tray `tray-boot-viewer`. After a leave, `maybeOfferNext` offers the next waiting viewer.
+- **`viewer.html`:** `kicked` sets `wantStay = false` and returns to the connect card.
+
 ## 2026-09-12 v1.6.9 white host window
 
 - **No Google Fonts `@import` in `index.html`.** It blocked first paint. **`main.js`:** `backgroundColor: '#0A0B0E'`, `show: false` until `ready-to-show`. `showWindow` reloads if crashed or URL is not `index.html`. `did-fail-load` / `unresponsive` reload.
@@ -21,7 +27,7 @@
 
 ## 2026-09-11 v1.6.5 offer per viewer id
 
-- **`index.html`:** `viewer-joined` is on `initSocket`. Skip a new offer only when `pc` is live *and* `viewerId === lastViewerId`. Otherwise `createPC()` (closes the old one) and send an offer. The 1.5.x "don't tear down a live peer on signaling rejoin" still holds for the same socket.
+- **`index.html`:** `viewer-joined` is on `initSocket`. Skip a new offer only when `pc` is live *and* `info.id === lastViewerId`. Otherwise `createPC()` (closes the old one) and send an offer. The 1.5.x "don't tear down a live peer on signaling rejoin" still holds for the same socket.
 - **`server.js` `claimRoom`:** emit `viewer-joined` for waiting viewers only when the host socket *changes*. The 10s pulse is a same-socket reclaim and stays quiet.
 
 ## 2026-09-11 v1.6.4 sticky rooms

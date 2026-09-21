@@ -24,7 +24,7 @@ ok('headersTimeout long enough for tunnel', /server\.headersTimeout\s*=\s*60000/
 ok('cors defaults to star', /ALLOWED_ORIGINS === '\*'\)/.test(serverJs) && /!\s*process\.env\.ALLOWED_ORIGINS/.test(serverJs));
 ok('close hides not quits', /window hidden — signaling still listening/.test(mainJs));
 ok('minimize hides not throttles', /window hidden — minimize/.test(mainJs) && /setRelayedInput/.test(mainJs));
-ok('viewer-joined keeps live pc for the same viewer', /keeping live WebRTC/.test(indexHtml) && /viewerId === lastViewerId/.test(indexHtml));
+ok('viewer-joined keeps live pc for the same viewer', /keeping live WebRTC/.test(indexHtml) && /info\.id === lastViewerId/.test(indexHtml));
 
 const PORT = 33991;
 const child = spawn(process.execPath, [path.join(root, 'server.js')], {

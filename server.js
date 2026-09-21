@@ -90,6 +90,19 @@ function loadStickyRoom() {
   } catch (_) {}
 }
 loadStickyRoom();
+function viewerInfo(socket) {
+  const sess = auth.session(socket.handshake.headers);
+  const ip = sockIp(socket);
+  const cf = String((socket.handshake.headers && socket.handshake.headers['cf-connecting-ip']) || '').trim();
+  const from = cf || ip || '';
+  return { id: socket.id, label: (sess && sess.n) || from || 'viewer', from };
+}
+function viewersOf(room) {
+  return [...room.viewers].filter((v) => v.connected).map(viewerInfo);
+}
+function emitOccupancy(room) {
+  if (room.host && room.host.connected) room.host.emit('session-viewers', viewersOf(room));
+}
 function claimRoom(socket, id) {
   const existing = rooms.get(id);
   if (existing) {
@@ -101,14 +114,16 @@ function claimRoom(socket, id) {
     persistRoom(id);
     socket.emit('room-created', id);
     if (hostChanged) {
-      for (const v of existing.viewers) { if (v.connected) socket.emit('viewer-joined', v.id); }
+      for (const v of existing.viewers) { if (v.connected) socket.emit('viewer-joined', viewerInfo(v)); }
     }
+    emitOccupancy(existing);
     return id;
   }
   rooms.set(id, { host: socket, viewers: new Set() });
   socket.join(id);
   persistRoom(id);
   socket.emit('room-created', id);
+  socket.emit('session-viewers', []);
   return id;
 }
 
@@ -145,7 +160,7 @@ function iceServers() {
 app.get('/ice-servers', gate, (_, res) => { res.set('Cache-Control', 'no-store'); res.json(iceServers()); });
 app.get('/rooms', (req, res) => {
   if (!auth.isLoopback(req)) return res.status(403).json({ error: 'host window only' });
-  res.json({ rooms: [...rooms].map(([id, r]) => ({ id, host: !!(r.host && r.host.connected), viewers: r.viewers.size })) });
+  res.json({ rooms: [...rooms].map(([id, r]) => ({ id, host: !!(r.host && r.host.connected), viewers: r.viewers.size, people: viewersOf(r) })) });
 });
 io.on('connection', (socket) => {
   const mine = lanIp(sockIp(socket));
@@ -169,11 +184,25 @@ io.on('connection', (socket) => {
     room.viewers.add(socket);
     socket.emit('room-joined', id);
     if (room.host && room.host.connected) {
-      room.host.emit('viewer-joined', socket.id);
+      room.host.emit('viewer-joined', viewerInfo(socket));
+      emitOccupancy(room);
       const vLan = lanIp(sockIp(socket));
       const hLan = lanIp(sockIp(room.host));
       if (hLan) socket.emit('peer-lan', hLan);
       if (vLan) room.host.emit('peer-lan', vLan);
+    }
+  });
+
+  socket.on('kick-viewer', (data) => {
+    const id = roomCode(data && data.roomId);
+    const room = rooms.get(id);
+    if (!room || room.host !== socket) return;
+    const want = data && data.viewerId;
+    for (const v of [...room.viewers]) {
+      if (!v.connected) continue;
+      if (want && want !== '*' && v.id !== want) continue;
+      try { v.emit('kicked', { roomId: id }); } catch (_) {}
+      setTimeout(() => { try { v.disconnect(true); } catch (_) {} }, 30);
     }
   });
 
@@ -197,7 +226,11 @@ io.on('connection', (socket) => {
       // renderer crash or a quiet socket drop; video on an old viewer kept working
       // so it looked like the host was up. The next phone then missed the code.
       if (room.host === socket) room.host = null;
-      else if (room.viewers.has(socket)) room.viewers.delete(socket);
+      else if (room.viewers.has(socket)) {
+        room.viewers.delete(socket);
+        if (room.host && room.host.connected) room.host.emit('viewer-left', { id: socket.id });
+        emitOccupancy(room);
+      }
     }
   });
 });

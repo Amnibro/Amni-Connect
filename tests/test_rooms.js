@@ -13,7 +13,10 @@ const ok = (name, cond) => { console.log((cond ? 'ok' : 'FAIL') + ' ' + name); c
 ok('rooms stay after the host socket drops', /Keep the room/.test(serverJs) && !/HOST_GRACE_MS/.test(serverJs));
 ok('last room code is persisted', /room\.json/.test(serverJs) && /loadStickyRoom/.test(serverJs));
 ok('host republishes the room on a timer', /_roomPulse/.test(indexHtml));
-ok('a new viewer still gets an offer while another pc is live', /lastViewerId/.test(indexHtml) && /viewerId === lastViewerId/.test(indexHtml));
+ok('a new viewer still gets an offer while another pc is live', /lastViewerId/.test(indexHtml) && /info\.id === lastViewerId/.test(indexHtml));
+ok('host paints occupancy and can boot', /sessionPeople/.test(indexHtml) && /bootViewer/.test(indexHtml) && /kick-viewer/.test(indexHtml));
+ok('viewer stops and does not rejoin after a kick', /socket\.on\('kicked'/.test(viewerHtml) && /The host ended your session/.test(viewerHtml) && /wantStay = false/.test(viewerHtml));
+ok('signaling boots only from the host', /kick-viewer/.test(serverJs) && /viewer-left/.test(serverJs) && /session-viewers/.test(serverJs));
 ok('viewer sanitizes room code', viewerHtml.includes(".replace(/\\s+/g, '-')") && viewerHtml.includes(".replace(/[^A-Z0-9-]/g, '')"));
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'amni-rooms-'));
@@ -55,10 +58,27 @@ const sock = (extra = {}) => io(`http://127.0.0.1:${PORT}`, { transports: ['webs
   await wait(100);
   const afterFirst = joinedN;
   ok('join notifies the host once', afterFirst === 1);
+  let leftN = 0, kicked = '';
+  host.on('viewer-left', () => leftN++);
   host.emit('create-room', 'ANTMAN-PC');
   await wait(200);
   ok('same-host reclaim does not re-fire viewer-joined', joinedN === afterFirst);
+  const roomsLive = (await req('GET', '/rooms')).json;
+  const listedRoom = roomsLive && roomsLive.rooms && roomsLive.rooms.find(r => r.id === 'ANTMAN-PC');
+  ok('GET /rooms shows the occupant', !!(listedRoom && listedRoom.viewers === 1 && listedRoom.people && listedRoom.people[0] && listedRoom.people[0].id));
+  const stranger = sock();
+  await new Promise((resolve) => { stranger.on('connect', resolve); });
+  stranger.emit('kick-viewer', { roomId: 'ANTMAN-PC', viewerId: '*' });
+  await wait(200);
+  ok('a non-host kick is ignored', waiter.connected);
+  waiter.on('kicked', (d) => { kicked = (d && d.roomId) || 'yes'; });
+  host.emit('kick-viewer', { roomId: 'ANTMAN-PC', viewerId: '*' });
+  await wait(400);
+  ok('host kick tells the viewer', kicked === 'ANTMAN-PC');
+  ok('kicked viewer socket is gone', waiter.connected === false);
+  ok('host sees viewer-left after boot', leftN >= 1);
   waiter.close();
+  stranger.close();
   host.close();
   await wait(200);
   const afterDrop = await new Promise((resolve) => {

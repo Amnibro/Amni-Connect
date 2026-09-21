@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onHwVideo: (callback) => ipcRenderer.on('hw-video', (_, msg) => callback(msg)),
   hideToTray: (label) => ipcRenderer.invoke('hide-to-tray', label),
   setTrayHost: (on, label) => ipcRenderer.invoke('set-tray-host', on, label),
+  setSessionOccupancy: (n, label) => ipcRenderer.invoke('set-session-occupancy', n, label),
   showWindow: () => ipcRenderer.invoke('show-window'),
-  onTrayEndSession: (callback) => ipcRenderer.on('tray-end-session', () => callback())
+  onTrayEndSession: (callback) => ipcRenderer.on('tray-end-session', () => callback()),
+  onTrayBootViewer: (callback) => ipcRenderer.on('tray-boot-viewer', () => callback())
 });

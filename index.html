@@ -13,6 +13,17 @@
         .logo { font-size: 20px; font-weight: 700; color: var(--you); display: flex; align-items: center; gap: 10px; letter-spacing: -.02em; }
         .hdr-chips { display:inline-flex; gap:6px; flex-wrap:wrap; }
         .hdr-chips span { font:650 10px/1.1 ui-monospace,Consolas,monospace; padding:4px 8px; border-radius:999px; border:1px solid var(--line); color:var(--mut); }
+        .hdr-chips span.in { color:#86efac; border-color:color-mix(in srgb,#86efac 35%,var(--line)); }
+        .session-people { margin: 4px 0 12px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #0f141c; }
+        .session-people.in { border-color: color-mix(in srgb, #22c55e 40%, var(--line)); }
+        .session-row { display: flex; align-items: center; gap: 10px; }
+        .session-row + .session-row { margin-top: 8px; }
+        .session-dot { width: 8px; height: 8px; border-radius: 50%; background: #64748b; flex-shrink: 0; }
+        .session-people.in .session-dot { background: #22c55e; box-shadow: 0 0 0 4px color-mix(in srgb, #22c55e 22%, transparent); }
+        .session-who { flex: 1; min-width: 0; }
+        .session-who strong { display: block; font-size: 13px; }
+        .session-who span { display: block; font-size: 11px; color: var(--mut); }
+        button.boot-btn { width: auto; margin: 0; padding: 6px 12px; font-size: 12px; flex-shrink: 0; }
         .status { padding: 6px 16px; border-radius: 9999px; font-size: 13px; font-weight: 500; background: #64748b; }
         .main { flex: 1; display: flex; padding: 20px; gap: 20px; overflow: hidden; min-height: 0; }
         .panel { background: var(--surface); border-radius: 14px; padding: 20px; border: 1px solid #334155; width: 320px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
@@ -126,7 +137,7 @@
     <div class="container">
         <header>
             <div class="logo">Amni-Connect</div>
-            <div class="hdr-chips" id="hdrChips"><span id="chipSig">sig —</span><span id="chipRtc">rtc —</span><span id="chipIn">input —</span></div>
+            <div class="hdr-chips" id="hdrChips"><span id="chipWho">empty</span><span id="chipSig">sig —</span><span id="chipRtc">rtc —</span><span id="chipIn">input —</span></div>
             <div id="status" class="status">Disconnected</div>
         </header>
         <div class="main">
@@ -175,6 +186,17 @@
                             </div>
                             <img id="enrollQr" alt="Scan to enroll" style="display:none">
                         </div>
+                    </div>
+                    <div id="sessionPeople" class="session-people">
+                        <div class="session-row">
+                            <span class="session-dot" id="sessionDot"></span>
+                            <div class="session-who">
+                                <strong id="sessionPeopleTitle">No one in session</strong>
+                                <span id="sessionPeopleSub">A join shows up here. Boot drops them and keeps the room up.</span>
+                            </div>
+                            <button type="button" class="danger boot-btn" id="bootAllBtn" onclick="bootViewer('*')" style="display:none">Boot</button>
+                        </div>
+                        <div id="sessionPeopleList"></div>
                     </div>
                     <button class="danger" onclick="endSession()">&#9940; End Session</button>
                 </div>
@@ -619,23 +641,112 @@
             socket.on('peer-lan', (ip) => { peerLan = ip || peerLan; });
             socket.on('ice-candidate', ({ candidate }) => addIce(candidate));
             socket.on('host-disconnected', () => { log('Host disconnected', 'error'); setStatus('Disconnected', '#ef4444'); });
-            socket.on('viewer-joined', async (viewerId) => {
+            socket.on('viewer-joined', async (payload) => {
                 if (!isHost || !roomId) return;
+                const info = viewerInfoOf(payload);
+                if (!info.id) return;
+                rememberViewer(info);
                 const live = pc && (pc.connectionState === 'connected' || pc.connectionState === 'connecting');
-                if (live && viewerId && viewerId === lastViewerId) {
+                if (live && info.id === lastViewerId) {
                     log('Viewer re-joined signaling — keeping live WebRTC');
                     return;
                 }
-                lastViewerId = viewerId || '';
-                try { window.electronAPI.sendInputEvent({ type: 'reset-mods' }); } catch (_) {}
-                log('Viewer joined — sending offer');
-                createPC();
-                const offer = await setLocalMunged(await pc.createOffer());
-                socket.emit('offer', { roomId, offer });
+                await offerViewer(info.id);
+            });
+            socket.on('viewer-left', (payload) => {
+                const id = viewerInfoOf(payload).id;
+                if (id) sessionViewers.delete(id);
+                if (id && id === lastViewerId) dropViewerPc();
+                paintOccupancy();
+                maybeOfferNext();
+            });
+            socket.on('session-viewers', (list) => {
+                sessionViewers.clear();
+                (Array.isArray(list) ? list : []).forEach((p) => rememberViewer(viewerInfoOf(p), true));
+                paintOccupancy();
             });
         }
 
         let dataChannel, hostIceTries = 0, hostRecoverBusy = false, lastViewerId = '';
+        const sessionViewers = new Map();
+        function viewerInfoOf(payload) {
+            if (typeof payload === 'string') return { id: payload, label: 'viewer', from: '' };
+            const id = payload && payload.id ? String(payload.id) : '';
+            return { id, label: (payload && (payload.label || payload.from)) || 'viewer', from: (payload && payload.from) || '' };
+        }
+        function rememberViewer(info, quiet) {
+            if (!info || !info.id) return;
+            sessionViewers.set(info.id, info);
+            if (!quiet) paintOccupancy();
+        }
+        function paintOccupancy() {
+            const n = sessionViewers.size;
+            const chip = document.getElementById('chipWho');
+            if (chip) { chip.textContent = n ? (n === 1 ? '1 in' : n + ' in') : 'empty'; chip.className = n ? 'in' : ''; }
+            const box = document.getElementById('sessionPeople');
+            if (box) { box.style.display = isHost ? '' : 'none'; box.classList.toggle('in', n > 0); }
+            const title = document.getElementById('sessionPeopleTitle');
+            const sub = document.getElementById('sessionPeopleSub');
+            const bootAll = document.getElementById('bootAllBtn');
+            const list = document.getElementById('sessionPeopleList');
+            const first = n ? sessionViewers.values().next().value : null;
+            if (title) title.textContent = n ? (n === 1 ? 'In session' : n + ' in session') : 'No one in session';
+            if (sub) sub.textContent = n === 1 ? (first.label + (first.from && first.from !== first.label ? ' · ' + first.from : '')) : (n ? 'Boot drops them. The room stays up.' : 'A join shows up here. Boot drops them and keeps the room up.');
+            if (bootAll) bootAll.style.display = n ? '' : 'none';
+            if (list) {
+                list.innerHTML = '';
+                if (n > 1) {
+                    for (const v of sessionViewers.values()) {
+                        const row = document.createElement('div');
+                        row.className = 'session-row';
+                        row.innerHTML = '<span class="session-dot"></span><div class="session-who"><strong></strong><span></span></div>';
+                        row.querySelector('strong').textContent = v.label;
+                        row.querySelector('span').textContent = v.from && v.from !== v.label ? v.from : v.id.slice(0, 8);
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.className = 'danger boot-btn';
+                        btn.textContent = 'Boot';
+                        btn.onclick = () => bootViewer(v.id);
+                        row.appendChild(btn);
+                        list.appendChild(row);
+                    }
+                }
+            }
+            if (isHost && roomId) {
+                const label = 'Hosting ' + roomId + (n ? ' · ' + (n === 1 ? '1 in session' : n + ' in session') : ' · empty');
+                try { window.electronAPI?.setSessionOccupancy?.(n, label); } catch (_) {}
+                if (n) setStatus('Hosting · in session', '#22c55e');
+                else if (document.getElementById('activeSession')?.style.display === 'block') setStatus('Hosting · E2EE', '#22c55e');
+            }
+        }
+        function bootViewer(id) {
+            if (!isHost || !roomId || !socket) return;
+            const want = id || '*';
+            const who = want === '*' ? (sessionViewers.size === 1 ? sessionViewers.values().next().value.label : sessionViewers.size + ' viewers') : ((sessionViewers.get(want) || {}).label || want);
+            socket.emit('kick-viewer', { roomId, viewerId: want });
+            log('Booted ' + who);
+        }
+        function dropViewerPc() {
+            try { pc?.close(); } catch (_) {}
+            pc = null;
+            lastViewerId = '';
+            paintHostChips();
+        }
+        async function offerViewer(viewerId) {
+            lastViewerId = viewerId || '';
+            try { window.electronAPI.sendInputEvent({ type: 'reset-mods' }); } catch (_) {}
+            log('Viewer joined — sending offer');
+            createPC();
+            const offer = await setLocalMunged(await pc.createOffer());
+            socket.emit('offer', { roomId, offer });
+        }
+        function maybeOfferNext() {
+            if (!isHost || !roomId || !sessionViewers.size) return;
+            const live = pc && (pc.connectionState === 'connected' || pc.connectionState === 'connecting');
+            if (live) return;
+            const next = sessionViewers.values().next().value;
+            if (next) offerViewer(next.id);
+        }
         function paintHostChips() {
             const sig = document.getElementById('chipSig');
             const rtc = document.getElementById('chipRtc');
@@ -927,9 +1038,10 @@
                 paintPairQr();
                 setStatus('Hosting \u2022 E2EE', '#22c55e');
                 setLiveSettings(true);
+                paintOccupancy();
                 log(`Room ${roomId} created — sharing: ${src.name}`, 'success');
                 if (userClickedHost && document.getElementById('trayToggle').checked && window.electronAPI?.hideToTray) {
-                    const hid = await window.electronAPI.hideToTray('Hosting ' + roomId);
+                    const hid = await window.electronAPI.hideToTray('Hosting ' + roomId + ' · empty');
                     if (hid && hid.status === 'hidden') log('Hosting in tray — click the Amni-Connect icon to show the window');
                 }
                 socket.on('input-event', (data) => { inCount.relay++; });
@@ -1139,6 +1251,7 @@
 
         window.electronAPI?.onStatusUpdate?.(msg => log(msg));
         window.electronAPI?.onTrayEndSession?.(() => endSession(true));
+        window.electronAPI?.onTrayBootViewer?.(() => bootViewer('*'));
         if (localStorage.getItem('amni-tray-host') === '1') document.getElementById('trayToggle').checked = true;
         window.electronAPI?.onHwVideo?.(msg => {
             if (msg.kind === 1) { hwPath = true; window.electronAPI?.ackHwFrame?.(); return; }

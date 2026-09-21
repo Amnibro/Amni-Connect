@@ -459,6 +459,10 @@ function connect() {
     paintLinkChips();
     setTimeout(() => { if (socket?.connected && roomId && wantStay) socket.emit('join-room', roomId); }, 2000);
   });
+  socket.on('kicked', () => {
+    wantStay = false;
+    disconnect('The host ended your session');
+  });
 }
 
 let dataChannel;
@@ -1299,12 +1303,12 @@ function toggleVoice() {
   catch (e) { showToast('Mic blocked'); }
 }
 
-function disconnect() {
+function disconnect(msg) {
   wantStay = false;
   pc?.close(); socket?.disconnect(); stopViewerStats();
   document.getElementById('viewer-screen').style.display = 'none';
   document.getElementById('connect-screen').style.display = 'flex';
-  setStatus('Disconnected');
+  setStatus(msg || 'Disconnected');
   paintLinkChips();
 }
 
