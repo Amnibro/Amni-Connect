@@ -1,12 +1,5 @@
-/* AMNI-SCIENT brand layer for the Amni-Connect host window (index.html).
-   Loaded after the inline <style>, so these rules win the cascade.
-   Same identity as amni-scient.com: cool graphite, machined brass for chrome
-   and wayfinding, Archivo width axis, 4/3/2 radii, hairlines instead of glows.
-   Connect's product color (--acc, site --p-connect) marks live/primary state. */
-
 @font-face{font-family:Archivo;font-style:normal;font-weight:100 900;font-stretch:62% 125%;font-display:swap;src:url(fonts/archivo-var.woff2) format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
 @font-face{font-family:Archivo;font-style:normal;font-weight:100 900;font-stretch:62% 125%;font-display:swap;src:url(fonts/archivo-var-ext.woff2) format('woff2');unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
-
 :root{
   --bg:#0B0D10;--bg2:#0D0F12;--panel:#111418;--panel2:#161A20;
   --line:#20242B;--line2:#2E343D;--hairline:color-mix(in srgb,#fff 9%,transparent);
@@ -17,23 +10,17 @@
   --sans:"Archivo","Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;
   --ease:cubic-bezier(.22,1,.36,1);
-  /* legacy names used by the inline sheet */
   --primary:var(--acc);--primary-dark:#2BB885;--paper:var(--bg);--surface:var(--panel);--you:var(--brand);
   color-scheme:dark;
 }
-
 body{font-family:var(--sans);background:var(--bg);color:var(--ink);letter-spacing:.005em}
 ::selection{background:var(--brand-dim);color:var(--ink)}
 :focus-visible{outline:2px solid var(--brand);outline-offset:1px}
-
-/* ── App bar: the site's condensed-caps machined bar ── */
 header{background:var(--bg2);border-bottom:1px solid var(--line);padding:10px 18px}
 .logo{font-family:var(--sans);font-stretch:80%;font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.14em;color:var(--ink);gap:9px}
 .logo::before{content:"";width:7px;height:7px;background:var(--acc);flex:0 0 auto}
 .hdr-chips span{font:600 10px/1.1 var(--mono);border-radius:2px;border-color:var(--line);color:var(--mut);background:var(--bg)}
 .hdr-chips span.in{color:var(--acc);border-color:color-mix(in srgb,var(--acc) 35%,var(--line))}
-
-/* Status: JS paints a background color; re-ground it as a quiet chip with a state dot. */
 .status{font-family:var(--sans);font-stretch:85%;font-weight:650;font-size:11px;text-transform:uppercase;letter-spacing:.1em;border-radius:2px;padding:6px 12px 6px 10px;display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line2);background:var(--panel)!important;color:var(--mut)}
 .status::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--dim)}
 .status[style*="34, 197, 94"],.status[style*="22c55e"]{color:var(--ink);border-color:color-mix(in srgb,var(--acc) 40%,var(--line2))}
@@ -42,8 +29,6 @@ header{background:var(--bg2);border-bottom:1px solid var(--line);padding:10px 18
 .status[style*="239, 68, 68"]::before,.status[style*="ef4444"]::before{background:var(--bad)}
 .status[style*="245, 158, 11"],.status[style*="f59e0b"],.status[style*="59, 130, 246"],.status[style*="3b82f6"]{color:var(--ink);border-color:color-mix(in srgb,var(--brand) 45%,var(--line2))}
 .status[style*="245, 158, 11"]::before,.status[style*="f59e0b"]::before,.status[style*="59, 130, 246"]::before,.status[style*="3b82f6"]::before{background:var(--brand)}
-
-/* ── Surfaces: hairlines carry structure, never glows ── */
 .main{gap:14px;padding:14px}
 .card,.panel{background:var(--panel);border:1px solid var(--line);border-radius:4px;background-image:linear-gradient(160deg,rgba(255,255,255,.028),rgba(255,255,255,.005) 58%,transparent)}
 #remoteScreen{border-radius:4px;border-color:var(--line)}
@@ -54,8 +39,6 @@ h2.section-head{border-top-color:var(--line)}
 .session-dot{background:var(--dim)}
 .session-people.in .session-dot{background:var(--acc);box-shadow:0 0 0 4px var(--acc-dim)}
 .session-who span{color:var(--mut)}
-
-/* ── Controls: mono where numbers live, 3px machine radius ── */
 input,select,textarea{background:var(--bg2);border:1px solid var(--line2);border-radius:3px;color:var(--ink);font-family:var(--sans);transition:border-color .18s var(--ease)}
 input:focus,select:focus,textarea:focus{border-color:var(--brand);outline:none}
 select option{background:var(--panel)}
@@ -82,16 +65,12 @@ button.muted:hover,.mon-refresh:hover,.pair-reset:hover{background:var(--panel2)
 .toggle input:checked+.slider:before{background:var(--acc-ink)}
 .auto-hint{color:var(--brand);font-stretch:80%;letter-spacing:.12em}
 .settings-grid .toggle-row{border-bottom-color:var(--line)}
-
-/* Room code: brass on graphite, tabular mono */
 .room-code{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--brand-soft);background:var(--bg2);border:1px solid var(--line2);border-radius:3px;letter-spacing:.3em}
 .pair-row input{font-family:var(--mono)}
 .pair-hint{font-family:var(--mono);color:var(--mut)}
 .pair-hint.warn{color:var(--warn)}
 .pair-grid img,.remote-grid img{border-radius:3px}
 .device-list a{color:var(--bad)}
-
-/* Monitor picker */
 .mon-card{background:var(--bg2);border:1px solid var(--line2);border-radius:3px}
 .mon-card:hover{background:var(--bg2);border-color:var(--mut)}
 .mon-card.sel{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc-dim)}
@@ -99,8 +78,6 @@ button.muted:hover,.mon-refresh:hover,.pair-reset:hover{background:var(--panel2)
 .mon-sub,.mon-badge{font-family:var(--mono)}
 .mon-badge{background:rgba(11,13,16,.85);border-color:var(--line2);border-radius:2px}
 .mon-flag{background:var(--acc);color:var(--acc-ink);border-radius:2px;font-family:var(--sans);font-stretch:80%;letter-spacing:.1em}
-
-/* Stats + log */
 .stat-box{background:var(--bg2);border:1px solid var(--line);border-radius:3px}
 .stat-box .stat-label{color:var(--mut);font-stretch:80%;letter-spacing:.12em}
 .stat-box .stat-val{color:var(--ink);font-family:var(--mono);font-variant-numeric:tabular-nums}
@@ -108,12 +85,10 @@ button.muted:hover,.mon-refresh:hover,.pair-reset:hover{background:var(--panel2)
 .log{background:var(--bg);border:1px solid var(--line);border-radius:3px;font-family:var(--mono);color:#C9CDD3}
 .v-resizer::before{background:var(--line2);border-radius:1px}
 .v-resizer:hover::before,.v-resizer.drag::before,.v-resizer:focus-visible::before{background:var(--brand)}
-
 ::-webkit-scrollbar{width:10px;height:10px}
 ::-webkit-scrollbar-thumb{background:var(--line2);border-radius:0;border:2px solid var(--bg);background-clip:padding-box}
 ::-webkit-scrollbar-track{background:transparent}
 .card::-webkit-scrollbar,.panel-scroll::-webkit-scrollbar,.log::-webkit-scrollbar{width:8px}
 .card::-webkit-scrollbar-thumb,.panel-scroll::-webkit-scrollbar-thumb,.log::-webkit-scrollbar-thumb{background:var(--line2);border-radius:0}
 *{scrollbar-color:var(--line2) transparent}
-
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
