@@ -18,7 +18,7 @@ fs.mkdirSync(INBOX_DIR, { recursive: true });
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server, { cors: { origin: ALLOWED_ORIGINS, methods: ['GET', 'POST'] } });
+const io = socketIo(server, { cors: { origin: ALLOWED_ORIGINS, methods: ['GET', 'POST'] }, maxHttpBufferSize: 4e6 });
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -231,6 +231,12 @@ io.on('connection', (socket) => {
     socket.to(data.roomId).emit(ev, out);
   });
   ['offer', 'answer', 'ice-candidate'].forEach(route);
+  socket.on('sv', (data) => {
+    const room = data && rooms.get(roomCode(data.roomId));
+    if (!room || !auth.allowed(socket.handshake.headers)) return;
+    if (room.host === socket) return data.to && [...room.viewers].some(v => v.id === String(data.to)) && socket.to(String(data.to)).emit('sv', data);
+    if (room.viewers.has(socket) && room.host && room.host.connected && ['want', 'ack', 'key', 'stop'].includes(data.t)) room.host.emit('sv', { t: data.t, seq: Number(data.seq) || 0, roomId: data.roomId, from: socket.id });
+  });
 
   socket.on('input-event', (data) => {
     if (!auth.allowed(socket.handshake.headers)) return socket.emit('input-dropped', { reason: 'passkey required' });

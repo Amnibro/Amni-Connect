@@ -1,5 +1,16 @@
 # Amni-Connect Changelog
 
+## v1.6.20 - browsers without WebRTC get the screen over the signalling socket (2026-09-23)
+
+### Added
+- **Amni-Browse (and any browser without WebRTC) can view a host.** Arch builds WebKitGTK without WebRTC, so `RTCPeerConnection` does not exist in Amni-Browse and the viewer stayed black. The viewer now joins in socket mode and asks for the screen over socket.io (`sv` events). The host clones its capture track (at most 1080p/30), encodes H.264 with WebCodecs `VideoEncoder` in `avc` format, and sends each frame only to that viewer. WebKit's decoder rejects Annex B keyframes, so the avcC description goes with every keyframe. Input already fell back to the socket relay.
+- The viewer acknowledges every frame. When a viewer is more than 3 frames behind, the host drops frames before encoding, so the picture never corrupts. It keeps the last frame so a new or recovering viewer gets a keyframe at once, even from a static Wayland screen.
+- `?transport=socket` forces socket mode, for networks where WebRTC is blocked.
+- The server relays `sv` host → addressed viewer only, and viewer → host only for `want/ack/key/stop` from a joined viewer. The socket.io message cap is 4 MB so keyframes fit.
+
+### Tests
+- `tests/test_socket_stream.js` (14 checks): wiring, plus a live relay run showing a viewer can't push frames, a non-member is ignored, and a 1.5 MB keyframe reaches only the addressed viewer. It streams live in Amni-Browse (WebKitGTK) and Chrome against a throwaway server.
+
 ## v1.6.19 - a Linux host shows its screen and takes touch and pad input on Wayland (2026-09-23)
 
 ### Fixed

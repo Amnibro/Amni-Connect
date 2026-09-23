@@ -12,10 +12,10 @@
 
 | Platform | Install |
 | --- | --- |
-| **Windows** | [Amni-Connect-Setup-1.6.19.exe](https://github.com/Amnibro/Amni-Connect/releases/latest/download/Amni-Connect-Setup-1.6.19.exe) — run it, allow UAC. If SmartScreen: **More info → Run anyway**. |
-| **Linux (AppImage)** | [Amni-Connect-1.6.19.AppImage](https://github.com/Amnibro/Amni-Connect/releases/latest/download/Amni-Connect-1.6.19.AppImage) — `chmod +x` then run. Works on most distros. |
-| **Debian / Ubuntu / Mint** | [Amni-Connect-1.6.19.deb](https://github.com/Amnibro/Amni-Connect/releases/latest/download/Amni-Connect-1.6.19.deb) — `sudo apt install ./Amni-Connect-1.6.19.deb` |
-| **Fedora / RHEL / openSUSE** | [Amni-Connect-1.6.19.rpm](https://github.com/Amnibro/Amni-Connect/releases/latest/download/Amni-Connect-1.6.19.rpm) — `sudo dnf install ./Amni-Connect-1.6.19.rpm` |
+| **Windows** | [Amni-Connect-Setup-1.6.20.exe](https://github.com/Amnibro/Amni-Connect/releases/latest/download/Amni-Connect-Setup-1.6.20.exe) — run it, allow UAC. If SmartScreen: **More info → Run anyway**. |
+| **Linux (AppImage)** | [Amni-Connect-1.6.20.AppImage](https://github.com/Amnibro/Amni-Connect/releases/latest/download/Amni-Connect-1.6.20.AppImage) — `chmod +x` then run. Works on most distros. |
+| **Debian / Ubuntu / Mint** | [Amni-Connect-1.6.20.deb](https://github.com/Amnibro/Amni-Connect/releases/latest/download/Amni-Connect-1.6.20.deb) — `sudo apt install ./Amni-Connect-1.6.20.deb` |
+| **Fedora / RHEL / openSUSE** | [Amni-Connect-1.6.20.rpm](https://github.com/Amnibro/Amni-Connect/releases/latest/download/Amni-Connect-1.6.20.rpm) — `sudo dnf install ./Amni-Connect-1.6.20.rpm` |
 
 Linux one-liner (downloads the AppImage into `~/.local/bin` and adds a desktop entry):
 

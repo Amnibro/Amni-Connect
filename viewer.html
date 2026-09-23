@@ -432,6 +432,21 @@ function onScreenPacket(data) {
   setStatus('Streaming \u25cf Live');
 }
 let socket, pc, roomId;
+let sockMode = false, svDec = null, svCodec = '', svCtx = null, svAsked = 0;
+const svKey = () => { const now = Date.now(); now - svAsked > 1000 && socket?.connected && (svAsked = now, socket.emit('sv', { t: 'key', roomId })); };
+function svFrame(d) {
+  if (!d || d.t !== 'frame' || (d.to && socket?.id && d.to !== socket.id)) return;
+  socket.emit('sv', { t: 'ack', roomId, seq: d.seq });
+  const c = document.getElementById('remote-canvas');
+  if (!svDec || svDec.state === 'closed' || svCodec !== d.codec || (d.key && d.desc && svDec.state !== 'configured')) {
+    if (!d.key) return svKey();
+    try { svDec && svDec.state !== 'closed' && svDec.close(); } catch (e) {}
+    svCodec = d.codec; svCtx = svCtx || c.getContext('2d', { alpha: false });
+    svDec = new VideoDecoder({ output: (f) => { (c.width !== f.displayWidth || c.height !== f.displayHeight) && (c.width = f.displayWidth, c.height = f.displayHeight, layoutMediaFit()); svCtx.drawImage(f, 0, 0); f.close(); hwUsing || useHwSurface(true); setStatus('Streaming \u25cf Live (socket)'); }, error: () => { svDec = null; svKey(); } });
+    try { svDec.configure(d.desc ? { codec: d.codec, description: d.desc, optimizeForLatency: true } : { codec: d.codec, optimizeForLatency: true }); } catch (e) { svDec = null; return setStatus('This browser cannot decode ' + d.codec); }
+  }
+  try { svDec.decode(new EncodedVideoChunk({ type: d.key ? 'key' : 'delta', timestamp: d.seq * 33333, data: d.data })); } catch (e) { svDec = null; svKey(); }
+}
 const statusEl = document.getElementById('status-text');
 const setStatus = (t) => statusEl.textContent = t;
 const sigPill = document.getElementById('signal-pill');
@@ -480,12 +495,8 @@ function startViewerStats() {
 function stopViewerStats() { if (viewerStatsLoop) { clearInterval(viewerStatsLoop); viewerStatsLoop = null; } sigPill.classList.remove('on'); }
 
 function connect() {
-  // Some engines ship without WebRTC (Arch's WebKitGTK, so Amni-Browse on Amni OS):
-  // RTCPeerConnection is undefined, createPC() threw, and the viewer sat on a black
-  // screen. Say what works instead.
-  if (typeof RTCPeerConnection === 'undefined') {
-    return setStatus('This browser cannot show a remote screen (no WebRTC). Open this page in Chrome, Firefox or Edge, or use the Amni-Connect app.');
-  }
+  sockMode = typeof RTCPeerConnection === 'undefined' || urlParams.get('transport') === 'socket';
+  if (sockMode && typeof VideoDecoder !== 'function') return setStatus('This browser can show neither WebRTC nor WebCodecs video. Open this page in Chrome, Firefox or Edge, or use the Amni-Connect app.');
   const hostEl = document.getElementById('host-input');
   const codeEl = document.getElementById('code-input');
   const host = (hostEl && hostEl.value.trim()) || urlParams.get('host') || localStorage.getItem('amni-last-host') || location.hostname || '';
@@ -515,8 +526,9 @@ function connect() {
     document.getElementById('viewer-screen').style.display = 'block';
     document.getElementById('toolbar').style.display = 'flex';
     requestAnimationFrame(() => { layoutViewerChrome(); layoutMediaFit(); requestAnimationFrame(() => { layoutViewerChrome(); layoutMediaFit(); }); });
-    createPC();
+    sockMode ? (socket.emit('sv', { t: 'want', roomId }), setStatus(`Joined room ${id} \u2014 socket stream (this browser has no WebRTC)\u2026`)) : createPC();
   });
+  socket.on('sv', svFrame);
   socket.on('error', (msg) => setStatus(`Error: ${msg}`));
   socket.on('offer', async ({ offer, to }) => {
     if (to && socket.id && to !== socket.id) return;

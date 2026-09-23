@@ -695,6 +695,7 @@
                 const info = viewerInfoOf(payload);
                 if (!info.id) return;
                 rememberViewer(info);
+                if (svViewers.has(info.id)) return;
                 const peer = peers.get(info.id);
                 if (peer && isLive(peer.pc)) {
                     log('Viewer re-joined signaling — keeping live WebRTC');
@@ -704,11 +705,13 @@
             });
             socket.on('viewer-left', (payload) => {
                 const id = viewerInfoOf(payload).id;
+                if (id) svStop(id);
                 if (id) sessionViewers.delete(id);
                 if (id) dropViewerPc(id);
                 paintOccupancy();
                 maybeOfferNext();
             });
+            socket.on('sv', (d) => !isHost || !d || !d.from ? 0 : d.t === 'want' ? svStart(d.from) : d.t === 'ack' ? (svViewers.get(d.from) && (svViewers.get(d.from).ack = Math.max(svViewers.get(d.from).ack, d.seq))) : d.t === 'key' ? svStart(d.from) : d.t === 'stop' ? svStop(d.from) : 0);
             socket.on('session-viewers', (list) => {
                 sessionViewers.clear();
                 (Array.isArray(list) ? list : []).forEach((p) => rememberViewer(viewerInfoOf(p), true));
@@ -782,6 +785,58 @@
             lastViewerId = rest.length ? rest[rest.length - 1].id : '';
             if (!rest.length) viewerHw = false;
             paintHostChips();
+        }
+        const svViewers = new Map();
+        const svPick = async (w, h) => { for (const codec of ['avc1.42E028', 'avc1.4D0028', 'avc1.640028', 'avc1.42E033']) { const cfg = { codec, width: w, height: h, bitrate: 5000000, framerate: 30, latencyMode: 'realtime', avc: { format: 'avc' } }; try { if ((await VideoEncoder.isConfigSupported(cfg)).supported) return cfg; } catch (_) {} } return null; };
+        function svStop(id) {
+            const st = svViewers.get(id);
+            if (!st) return;
+            st.stop = true;
+            svViewers.delete(id);
+            try { st.reader?.cancel(); } catch (_) {}
+            try { st.enc?.state !== 'closed' && st.enc?.close(); } catch (_) {}
+            try { st.track?.stop(); } catch (_) {}
+            try { st.last?.close(); } catch (_) {}
+            log(`Socket stream to ${id.slice(0, 6)} stopped`);
+        }
+        function svEncode(id, st, f, key) {
+            if (st.stop || !st.enc || st.enc.state !== 'configured') return f.close();
+            try { st.enc.encode(f, { keyFrame: key }); } catch (e) { log('Socket stream encode: ' + (e && e.message), 'error'); }
+            f.close();
+        }
+        async function svStart(id) {
+            const cur = svViewers.get(id);
+            if (cur) return void (cur.key = true, cur.last && svEncode(id, cur, cur.last.clone(), true), cur.key = false);
+            const src = localStream?.getVideoTracks()[0];
+            if (!isHost || !src || typeof MediaStreamTrackProcessor !== 'function' || typeof VideoEncoder !== 'function') return log('Socket stream unavailable on this host', 'error');
+            dropViewerPc(id);
+            const st = { seq: 0, ack: 0, key: true, lastKey: 0, stop: false, enc: null, reader: null, track: src.clone(), last: null, w: 0, h: 0 };
+            svViewers.set(id, st);
+            try { await st.track.applyConstraints({ width: { max: 1920 }, height: { max: 1080 }, frameRate: { max: 30 } }); } catch (_) {}
+            st.reader = new MediaStreamTrackProcessor({ track: st.track }).readable.getReader();
+            log(`Socket stream to ${id.slice(0, 6)} (viewer has no WebRTC)`);
+            let lastAt = 0;
+            while (!st.stop) {
+                let r;
+                try { r = await st.reader.read(); } catch (_) { break; }
+                if (r.done || st.stop) { r.value?.close(); break; }
+                const f = r.value, w = f.displayWidth & ~1, h = f.displayHeight & ~1, now = performance.now();
+                if (w !== st.w || h !== st.h || !st.enc) {
+                    const cfg = await svPick(w, h);
+                    if (!cfg || st.stop) { f.close(); if (!cfg) { log('No H.264 encoder for the socket stream', 'error'); svStop(id); } break; }
+                    try { st.enc?.state !== 'closed' && st.enc?.close(); } catch (_) {}
+                    st.enc = new VideoEncoder({ output: (c, md) => { const b = new ArrayBuffer(c.byteLength); c.copyTo(b); md?.decoderConfig?.description && (st.desc = md.decoderConfig.description.slice ? md.decoderConfig.description.slice(0) : md.decoderConfig.description); socket?.emit('sv', { t: 'frame', roomId, to: id, seq: ++st.seq, key: c.type === 'key', codec: md?.decoderConfig?.codec || cfg.codec, desc: c.type === 'key' ? st.desc : undefined, data: b }); }, error: (e) => { log('Socket stream encoder: ' + (e && e.message), 'error'); svStop(id); } });
+                    st.enc.configure(cfg);
+                    st.w = w; st.h = h; st.key = true;
+                }
+                try { st.last?.close(); } catch (_) {}
+                st.last = f.clone();
+                const behind = st.seq - st.ack > 3 || st.enc.encodeQueueSize > 1;
+                if ((behind || now - lastAt < 30) && !st.key) { f.close(); continue; }
+                const key = st.key || now - st.lastKey > 5000;
+                st.key = false; lastAt = now; key && (st.lastKey = now);
+                svEncode(id, st, f, key);
+            }
         }
         async function offerViewer(viewerId) {
             lastViewerId = viewerId || '';
