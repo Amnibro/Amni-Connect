@@ -315,6 +315,9 @@ function createWindow() {
     height: 800,
     backgroundColor: '#0A0B0E',
     show: false,
+    // No File/Edit/View bar under the title bar: every other Amni app has just
+    // the system title bar. Alt still shows it, and its shortcuts keep working.
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
