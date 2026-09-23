@@ -25,10 +25,9 @@ impl Ptr {
         let c = [K::BTN_LEFT, K::BTN_RIGHT, K::BTN_MIDDLE][b as usize % 3].code();
         match v { Some(p) => self.emit(&[E::new(T::KEY, c, p as i32)]), None => self.emit(&[E::new(T::KEY, c, 1)]) && self.emit(&[E::new(T::KEY, c, 0)]) }
     }
-    pub fn wheel(&mut self, v: i32, h: i32) -> bool {
-        let ev: Vec<E> = [(R::REL_WHEEL.0, -v), (R::REL_HWHEEL.0, h)].iter().filter(|(_, n)| *n != 0).map(|(a, n)| E::new(T::RELATIVE, *a, *n)).collect();
-        ev.is_empty() || self.emit_m(&ev)
-    }
+    fn rels(&mut self, a: &[(u16, i32)]) -> bool { let ev: Vec<E> = a.iter().filter(|(_, n)| *n != 0).map(|(a, n)| E::new(T::RELATIVE, *a, *n)).collect(); ev.is_empty() || self.emit_m(&ev) }
+    pub fn wheel(&mut self, v: i32, h: i32) -> bool { self.rels(&[(R::REL_WHEEL.0, -v), (R::REL_HWHEEL.0, h)]) }
+    pub fn rel(&mut self, dx: i32, dy: i32) -> bool { self.m.is_some() && self.rels(&[(R::REL_X.0, dx), (R::REL_Y.0, dy)]) }
 }
 #[cfg(not(target_os = "linux"))]
 pub struct Ptr;
@@ -38,4 +37,5 @@ impl Ptr {
     pub fn abs(&mut self, _x: i32, _y: i32, _sw: i32, _sh: i32) -> bool { false }
     pub fn btn(&mut self, _b: u8, _v: Option<bool>) -> bool { false }
     pub fn wheel(&mut self, _v: i32, _h: i32) -> bool { false }
+    pub fn rel(&mut self, _dx: i32, _dy: i32) -> bool { false }
 }

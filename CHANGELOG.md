@@ -1,8 +1,11 @@
 # Amni-Connect Changelog
 
-## Unreleased
+## v1.6.19 - a Linux host shows its screen and takes touch and pad input on Wayland (2026-09-23)
 
 ### Fixed
+- **A Linux host sent a black screen to phones.** When every viewer reports it can decode hardware frames, the host switches its normal video track off and sends H.264 from the hardware capturer instead. That capturer only exists on Windows, so on Linux the track went dark and nothing replaced it (OpenH264 logged an input frame rate of 0). The track is now switched off only while hardware capture is actually running.
+- **Touch taps landed in the wrong place on Wayland, and the input daemon kept restarting.** Absolute moves went through enigo, XTEST and XWayland, which KWin reads as scaled logical pixels (125%), and the Windows-only cursor fallback made the daemon give up and respawn, raising a new KWin input prompt each time. On Wayland amni-control now creates two uinput devices: an absolute pointer with three buttons, mapped across the whole screen with no scaling, and a relative device for the wheel. Moves, clicks and scroll go through them; the keyboard stays on enigo.
+- **Switching touch to pad broke input.** Pad mode's relative moves still went through enigo, failed on Wayland and knocked the daemon over, which took touch down with it. Relative moves now go through the uinput relative device too.
 - **Viewer stayed black in browsers without WebRTC** (Amni-Browse on Amni OS: Arch builds
   WebKitGTK without it). `RTCPeerConnection` was undefined, the peer never came up, and nothing
   said why. The viewer now says so and points to Chrome, Firefox, Edge or the Amni-Connect app.
@@ -11,10 +14,6 @@
   errored or never painted left the screen black because the host was never told. The viewer now
   checks the H.264 profile with `VideoDecoder.isConfigSupported` first, and tells the host to send
   the normal track again on a decoder error or when no frame paints within six seconds.
-
-## v1.6.19 - the public link opens the viewer, and no stray menu bar (2026-09-23)
-
-### Fixed
 - **https://connect.amni-scient.com/ said "Cannot GET /".** The viewer was only served at `/viewer`. `/` now serves the same page, so the bare link works.
 - **Electron's default File/Edit/View menu bar showed under the Amni title bar.** It is hidden (Alt still shows it).
 

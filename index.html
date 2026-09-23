@@ -390,7 +390,7 @@
                 viewerHw = peer ? hwPeers > 0 : !!data.hw;
                 const allHw = peer ? hwPeers === peers.size : viewerHw;
                 if (!viewerHw) window.electronAPI?.stopHwCapture?.();
-                peerPcs().forEach(c => c.getSenders().forEach(s => { if (s.track && s.track.kind === 'video') s.track.enabled = !allHw; }));
+                peerPcs().forEach(c => c.getSenders().forEach(s => { if (s.track && s.track.kind === 'video') s.track.enabled = !(allHw && hwPath); }));
                 if (!allHw) applyStreamSettings();
                 log((peer ? 'Viewer ' + peer.id.slice(0, 6) + ' ' : 'Viewer ') + (data.hw ? 'can decode hardware frames' : 'needs the normal video track') + (peers.size > 1 ? ' (' + hwPeers + '/' + peers.size + ' on HW)' : ''));
                 return;

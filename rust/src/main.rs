@@ -305,7 +305,8 @@ fn apply(c: &mut Ctl, ev: &InputEvent) -> Option<String> {
         }
         "mouse-move-rel" => {
             if let (Some(dx), Some(dy)) = (ev.dx, ev.dy) {
-                let r = c.eng.move_mouse((dx * sw) as i32, (dy * sh) as i32, Coordinate::Rel);
+                let (rx, ry) = ((dx * sw).round() as i32, (dy * sh).round() as i32);
+                let r = if c.ui.rel(rx, ry) { Ok(()) } else { c.eng.move_mouse(rx, ry, Coordinate::Rel) };
                 c.note("move-rel", r);
             }
         }
