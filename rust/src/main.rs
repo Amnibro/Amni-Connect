@@ -2,6 +2,7 @@
 mod wire;
 #[cfg(windows)]
 mod capture;
+mod ptr;
 
 use enigo::{Axis, Button, Coordinate, Direction, Enigo, InputError, Key, Keyboard, Mouse, Settings};
 use serde::{Deserialize, Serialize};
@@ -156,12 +157,13 @@ struct Ctl {
     pending: Option<(i32, i32, Instant)>,
     shift_held: bool,
     auto_shift: bool,
+    ui: ptr::Ptr,
 }
 impl Ctl {
     fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let eng = Enigo::new(&Settings::default())?;
         let (sw, sh) = eng.main_display().unwrap_or((1920, 1080));
-        Ok(Self { eng, sw, sh, errs: 0, rebuilds: 0, misses: 0, direct: false, last: String::new(), pending: None, shift_held: false, auto_shift: false })
+        Ok(Self { eng, sw, sh, errs: 0, rebuilds: 0, misses: 0, direct: false, last: String::new(), pending: None, shift_held: false, auto_shift: false, ui: ptr::Ptr::new(sw, sh) })
     }
     fn shift(&mut self, down: bool, what: &str) {
         let r = self.eng.key(Key::Shift, if down { Direction::Press } else { Direction::Release });
@@ -208,6 +210,7 @@ impl Ctl {
         }
     }
     fn move_to(&mut self, tx: i32, ty: i32) {
+        if self.ui.abs(tx, ty, self.sw, self.sh) { return self.note("move-uinput", Ok(())); }
         self.verify();
         match self.direct {
             true => {
@@ -307,37 +310,37 @@ fn apply(c: &mut Ctl, ev: &InputEvent) -> Option<String> {
             }
         }
         "mouse-click" => {
-            let r = c.eng.button(Button::Left, Direction::Click);
+            let r = if c.ui.btn(0, None) { Ok(()) } else { c.eng.button(Button::Left, Direction::Click) };
             c.note("click-left", r);
         }
         "mouse-right-click" => {
-            let r = c.eng.button(Button::Right, Direction::Click);
+            let r = if c.ui.btn(1, None) { Ok(()) } else { c.eng.button(Button::Right, Direction::Click) };
             c.note("click-right", r);
         }
         "mouse-middle-click" => {
-            let r = c.eng.button(Button::Middle, Direction::Click);
+            let r = if c.ui.btn(2, None) { Ok(()) } else { c.eng.button(Button::Middle, Direction::Click) };
             c.note("click-middle", r);
         }
         "mouse-down" => {
-            let r = c.eng.button(Button::Left, Direction::Press);
+            let r = if c.ui.btn(0, Some(true)) { Ok(()) } else { c.eng.button(Button::Left, Direction::Press) };
             c.note("press-left", r);
         }
         "mouse-up" => {
-            let r = c.eng.button(Button::Left, Direction::Release);
+            let r = if c.ui.btn(0, Some(false)) { Ok(()) } else { c.eng.button(Button::Left, Direction::Release) };
             c.note("release-left", r);
         }
         "mouse-scroll" => {
             if let Some(dy) = ev.dy {
                 let l = dy as i32;
                 if l != 0 {
-                    let r = c.eng.scroll(l, Axis::Vertical);
+                    let r = if c.ui.wheel(l, 0) { Ok(()) } else { c.eng.scroll(l, Axis::Vertical) };
                     c.note("scroll-v", r);
                 }
             }
             if let Some(dx) = ev.dx {
                 let l = dx as i32;
                 if l != 0 {
-                    let r = c.eng.scroll(l, Axis::Horizontal);
+                    let r = if c.ui.wheel(0, l) { Ok(()) } else { c.eng.scroll(l, Axis::Horizontal) };
                     c.note("scroll-h", r);
                 }
             }
@@ -492,6 +495,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore]
+    fn uinput_pointer_registers() {
+        std::env::set_var("XDG_SESSION_TYPE", "wayland");
+        let p = crate::ptr::Ptr::new(3440, 1440);
+        std::thread::sleep(std::time::Duration::from_secs(20));
+        drop(p);
+    }
     use super::*;
     #[test]
     fn maps_laptop_keys() {
