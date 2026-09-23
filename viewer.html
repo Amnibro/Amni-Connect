@@ -334,6 +334,31 @@ function preferDesktopCodecs(peer) {
   peer.getTransceivers().forEach(t => { try { t.setCodecPreferences(ordered); } catch (e) {} });
 }
 let hwDec = null, hwParts = new Map(), hwCanvas = null, hwUsing = false;
+// Hardware frames are only claimed once the decoder has proven itself. When the
+// viewer says hw:true the host switches its normal video track off, so a decoder
+// that errors or never paints (WebKitGTK exposes VideoDecoder without every H.264
+// profile) left a black screen for good. hwClaimed tracks what the host was told.
+let hwClaimed = false, hwPainted = false, hwWatch = null;
+const HW_PROFILE = { codec: 'avc1.640028', codedWidth: 1920, codedHeight: 1080 };
+function sendCaps(hw) {
+  hwClaimed = hw;
+  try { inputChannel && inputChannel.readyState === 'open' && inputChannel.send(JSON.stringify({ type: 'viewer-caps', hw })); } catch (e) {}
+}
+async function announceCaps() {
+  let hw = false;
+  try { hw = typeof VideoDecoder === 'function' && !!(await VideoDecoder.isConfigSupported(HW_PROFILE)).supported; } catch (e) { hw = false; }
+  sendCaps(hw);
+  clearTimeout(hwWatch);
+  // Hardware frames arrive but nothing paints: take the normal video track back.
+  if (hw) hwWatch = setTimeout(() => { if (!hwPainted) hwFallback(); }, 6000);
+}
+function hwFallback() {
+  clearTimeout(hwWatch);
+  try { hwDec && hwDec.close(); } catch (e) {}
+  hwDec = null;
+  useHwSurface(false);
+  if (hwClaimed) sendCaps(false);
+}
 function useHwSurface(on) {
   hwUsing = on;
   const v = document.getElementById('remote-video');
@@ -358,13 +383,14 @@ function ensureHwDec(w, h, codec) {
       }
       ctx.drawImage(frame, 0, 0);
       frame.close();
+      hwPainted = true;
       if (!hwUsing) useHwSurface(true);
     },
-    error: () => { hwDec = null; useHwSurface(false); }
+    error: () => { hwFallback(); }
   });
   try {
     hwDec.configure({ codec: codec || 'avc1.640028', codedWidth: hwCanvas.width, codedHeight: hwCanvas.height, optimizeForLatency: true, hardwareAcceleration: 'prefer-hardware' });
-  } catch (e) { hwDec = null; return null; }
+  } catch (e) { hwFallback(); return null; }
   return hwDec;
 }
 function assembleScreen(buf) {
@@ -454,6 +480,12 @@ function startViewerStats() {
 function stopViewerStats() { if (viewerStatsLoop) { clearInterval(viewerStatsLoop); viewerStatsLoop = null; } sigPill.classList.remove('on'); }
 
 function connect() {
+  // Some engines ship without WebRTC (Arch's WebKitGTK, so Amni-Browse on Amni OS):
+  // RTCPeerConnection is undefined, createPC() threw, and the viewer sat on a black
+  // screen. Say what works instead.
+  if (typeof RTCPeerConnection === 'undefined') {
+    return setStatus('This browser cannot show a remote screen (no WebRTC). Open this page in Chrome, Firefox or Edge, or use the Amni-Connect app.');
+  }
   const hostEl = document.getElementById('host-input');
   const codeEl = document.getElementById('code-input');
   const host = (hostEl && hostEl.value.trim()) || urlParams.get('host') || localStorage.getItem('amni-last-host') || location.hostname || '';
@@ -578,7 +610,7 @@ function createPC() {
     }
     if (e.channel.label === 'input') {
       inputChannel = e.channel;
-      inputChannel.onopen = () => { paintLinkChips(); try { inputChannel.send(JSON.stringify({ type: 'viewer-caps', hw: typeof VideoDecoder === 'function' })); } catch (err) {} };
+      inputChannel.onopen = () => { paintLinkChips(); hwPainted = false; announceCaps(); };
       if (inputChannel.readyState === 'open') inputChannel.onopen();
       return;
     }

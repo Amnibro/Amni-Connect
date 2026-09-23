@@ -1,5 +1,17 @@
 # Amni-Connect Changelog
 
+## Unreleased
+
+### Fixed
+- **Viewer stayed black in browsers without WebRTC** (Amni-Browse on Amni OS: Arch builds
+  WebKitGTK without it). `RTCPeerConnection` was undefined, the peer never came up, and nothing
+  said why. The viewer now says so and points to Chrome, Firefox, Edge or the Amni-Connect app.
+- **Viewer could go black for good when its decoder failed.** It claimed hardware frames whenever
+  `VideoDecoder` existed; the host then switched its normal video track off, and a decoder that
+  errored or never painted left the screen black because the host was never told. The viewer now
+  checks the H.264 profile with `VideoDecoder.isConfigSupported` first, and tells the host to send
+  the normal track again on a decoder error or when no frame paints within six seconds.
+
 ## v1.6.19 - the public link opens the viewer, and no stray menu bar (2026-09-23)
 
 ### Fixed
