@@ -46,3 +46,7 @@ desktop.ini
 server.py
 __pycache__/
 *.pyc
+
+# Local secrets / inbox
+auth-secret
+received-files/

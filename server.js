@@ -25,7 +25,9 @@ const upload = multer({
     destination: (_, __, cb) => cb(null, INBOX_DIR),
     filename: (_, file, cb) => cb(null, `${Date.now()}_${crypto.randomBytes(4).toString('hex')}_${path.basename(file.originalname).replace(/[^\w.\-]/g, '_')}`)
   }),
-  limits: { fileSize: 2 * 1024 * 1024 * 1024 }
+  limits: { fileSize: 2 * 1024 * 1024 * 1024 },
+  // roomId is appended before the file, so an upload must name a live room code.
+  fileFilter: (req, _file, cb) => cb(null, rooms.has(roomCode(req.body && req.body.roomId)))
 });
 
 const auth = require('./auth').createAuth(DATA_ROOT);
@@ -71,7 +73,7 @@ app.post('/upload', gate, (req, res) => {
     if (!req.file) return res.status(400).json({ status: 'error', message: 'No file received' });
     const roomId = (req.body.roomId || '').toUpperCase();
     const room = rooms.get(roomId);
-    room?.host.emit('file-received', { name: req.file.originalname, size: req.file.size, savedAs: req.file.filename });
+    room?.host?.emit('file-received', { name: req.file.originalname, size: req.file.size, savedAs: req.file.filename });
     res.json({ status: 'ok', savedAs: req.file.filename });
   });
 });
@@ -135,6 +137,13 @@ server.on('error', (err) => {
   console.error('Amni-Connect signaling server error:', err);
 });
 
+// Room codes are the only secret while REQUIRE_PASSKEY is off: cap wrong guesses per client.
+const joinFails = new Map(), JOIN_FAIL_MAX = 20, JOIN_FAIL_WINDOW_MS = 10 * 60 * 1000;
+function clientKey(socket) {
+  const ip = sockIp(socket);
+  const cf = String((socket.handshake.headers && socket.handshake.headers['cf-connecting-ip']) || '').trim();
+  return cf && /^(127\.0\.0\.1|::1)$/.test(ip) ? cf : ip;
+}
 function sockIp(socket) {
   let a = socket.handshake?.address || socket.conn?.remoteAddress || '';
   if (a.startsWith('::ffff:')) a = a.slice(7);
@@ -177,9 +186,16 @@ io.on('connection', (socket) => {
 
   socket.on('join-room', (roomId) => {
     if (!auth.allowed(socket.handshake.headers)) { socket.emit('auth-required'); return socket.emit('error', 'Passkey required'); }
+    const who = clientKey(socket), now = Date.now(), fails = joinFails.get(who);
+    if (fails && now - fails.t < JOIN_FAIL_WINDOW_MS && fails.n >= JOIN_FAIL_MAX) return socket.emit('error', 'Too many wrong room codes - try again later');
     const id = roomCode(roomId);
     const room = rooms.get(id);
-    if (!room) return socket.emit('error', 'Room not found');
+    if (!room) {
+      const f = fails && now - fails.t < JOIN_FAIL_WINDOW_MS ? fails : { n: 0, t: now };
+      f.n++; joinFails.set(who, f);
+      if (joinFails.size > 5000) for (const [k, v] of joinFails) if (now - v.t >= JOIN_FAIL_WINDOW_MS) joinFails.delete(k);
+      return socket.emit('error', 'Room not found');
+    }
     socket.join(id);
     room.viewers.add(socket);
     socket.emit('room-joined', id);
@@ -206,9 +222,15 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('offer', (data) => socket.to(data.roomId).emit('offer', data));
-  socket.on('answer', (data) => socket.to(data.roomId).emit('answer', data));
-  socket.on('ice-candidate', (data) => socket.to(data.roomId).emit('ice-candidate', data));
+  const route = (ev) => socket.on(ev, (data) => {
+    if (!data) return;
+    const room = rooms.get(roomCode(data.roomId));
+    const out = { ...data, from: socket.id };
+    if (room && room.host === socket) return (data.to ? socket.to(String(data.to)) : socket.to(data.roomId)).emit(ev, out);
+    if (room && room.host && room.host.connected) return room.host.emit(ev, out);
+    socket.to(data.roomId).emit(ev, out);
+  });
+  ['offer', 'answer', 'ice-candidate'].forEach(route);
 
   socket.on('input-event', (data) => {
     if (!auth.allowed(socket.handshake.headers)) return socket.emit('input-dropped', { reason: 'passkey required' });
@@ -216,6 +238,7 @@ io.on('connection', (socket) => {
     // Never drop input silently -- a dead relay used to look identical to a working one,
     // because video rides WebRTC peer-to-peer and keeps flowing after signaling dies.
     if (!room) return socket.emit('input-dropped', { roomId: data.roomId, reason: 'no-room' });
+    if (!room.viewers.has(socket)) return socket.emit('input-dropped', { roomId: data.roomId, reason: 'not-joined' });
     if (relayedInput) relayedInput(data);
     if (room.host && room.host.connected) room.host.emit('input-event', data);
   });

@@ -3,17 +3,19 @@ use serde_json::json;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{mpsc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 
-const VIDEO_PORT: u16 = 7879;
+fn video_port() -> u16 { crate::env_port("AMNI_VIDEO_PORT", 7879) }
 
 struct Want {
     run: AtomicBool,
     idr: AtomicBool,
+    hello: AtomicBool,
     fps: AtomicU32,
     kbps: AtomicU32,
     output: AtomicU32,
+    maxw: AtomicU32,
+    maxh: AtomicU32,
 }
 
 struct Hub {
@@ -35,9 +37,12 @@ fn hub() -> &'static Hub {
         want: Want {
             run: AtomicBool::new(false),
             idr: AtomicBool::new(false),
+            hello: AtomicBool::new(false),
             fps: AtomicU32::new(60),
             kbps: AtomicU32::new(12000),
             output: AtomicU32::new(0),
+            maxw: AtomicU32::new(1920),
+            maxh: AtomicU32::new(1080),
         },
         clients: Mutex::new(Vec::new()),
         last_err: Mutex::new(String::new()),
@@ -52,7 +57,9 @@ fn hub() -> &'static Hub {
 
 fn set_err(msg: impl Into<String>) {
     let m = msg.into();
-    eprintln!("[amni-control] capture {m}");
+    if !m.is_empty() {
+        eprintln!("[amni-control] capture {m}");
+    }
     if let Ok(mut g) = hub().last_err.lock() {
         *g = m;
     }
@@ -99,13 +106,23 @@ pub fn command(v: &serde_json::Value) -> String {
             if let Some(n) = v.get("output").and_then(|x| x.as_u64()) {
                 h.want.output.store(n as u32, Ordering::Relaxed);
             }
+            if let Some(n) = v.get("width").and_then(|x| x.as_u64()) {
+                h.want.maxw.store(n.clamp(320, 3840) as u32, Ordering::Relaxed);
+            }
+            if let Some(n) = v.get("height").and_then(|x| x.as_u64()) {
+                h.want.maxh.store(n.clamp(180, 2160) as u32, Ordering::Relaxed);
+            }
             if t == "capture-start" {
+                if h.want.run.load(Ordering::Relaxed) && h.ready.load(Ordering::Relaxed) {
+                    h.want.hello.store(true, Ordering::Relaxed);
+                }
                 h.want.run.store(true, Ordering::Relaxed);
                 h.want.idr.store(true, Ordering::Relaxed);
             }
         }
         "capture-stop" => {
             h.want.run.store(false, Ordering::Relaxed);
+            h.want.hello.store(false, Ordering::Relaxed);
             h.ready.store(false, Ordering::Relaxed);
         }
         "capture-idr" => h.want.idr.store(true, Ordering::Relaxed),
@@ -137,25 +154,32 @@ pub fn spawn() {
 }
 
 async fn video_listen() {
-    let Ok(listener) = TcpListener::bind(("127.0.0.1", VIDEO_PORT)).await else {
-        set_err("video port 7879 bind failed");
+    let port = video_port();
+    let Ok(listener) = TcpListener::bind(("127.0.0.1", port)).await else {
+        set_err("video port bind failed");
         return;
     };
-    eprintln!("[amni-control] video listen 127.0.0.1:{VIDEO_PORT}");
+    eprintln!("[amni-control] video listen 127.0.0.1:{port}");
     loop {
         let Ok((stream, _)) = listener.accept().await else { continue };
         let (tx, rx) = mpsc::channel::<Vec<u8>>();
         if let Ok(mut g) = hub().clients.lock() {
             g.push(tx);
         }
-        tokio::spawn(async move {
-            let mut w = stream;
-            while let Ok(pkt) = rx.recv() {
-                if w.write_all(&pkt).await.is_err() {
-                    break;
+        let Ok(std_stream) = stream.into_std() else { continue };
+        let _ = std_stream.set_nonblocking(false);
+        std::thread::Builder::new()
+            .name("amni-video-out".into())
+            .spawn(move || {
+                use std::io::Write;
+                let mut w = std_stream;
+                while let Ok(pkt) = rx.recv() {
+                    if w.write_all(&pkt).is_err() {
+                        break;
+                    }
                 }
-            }
-        });
+            })
+            .ok();
     }
 }
 
@@ -196,9 +220,10 @@ mod win {
         D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
     };
     use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
-    use windows::Win32::Graphics::Dxgi::{IDXGIDevice, IDXGIOutput1, IDXGIOutputDuplication, IDXGIResource, DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO, DXGI_OUTPUT_DESC};
+    use windows::Win32::Graphics::Dxgi::{IDXGIDevice, IDXGIOutput1, IDXGIOutput5, IDXGIOutputDuplication, IDXGIResource, DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO, DXGI_OUTPUT_DESC};
+    use windows::Win32::UI::HiDpi::{SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
     use windows::Win32::Media::MediaFoundation::{
-        CMSH264EncoderMFT, ICodecAPI, IMFActivate, IMFTransform, MFCreateMediaType, MFCreateMemoryBuffer, MFCreateSample, MFStartup, MFTEnumEx, MFMediaType_Video, MFVideoFormat_H264, MFVideoFormat_NV12, MF_E_TRANSFORM_NEED_MORE_INPUT, MF_LOW_LATENCY, MF_MT_AVG_BITRATE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE, MF_MT_MPEG2_PROFILE, MF_MT_SUBTYPE, MF_VERSION, MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_FLAG_HARDWARE, MFT_ENUM_FLAG_SORTANDFILTER, MFT_ENUM_FLAG_SYNCMFT, MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, MFT_MESSAGE_NOTIFY_START_OF_STREAM, MFT_OUTPUT_DATA_BUFFER, MFT_REGISTER_TYPE_INFO, eAVEncH264VProfile_High, MFSTARTUP_FULL, MFVideoInterlace_Progressive,
+        CMSH264EncoderMFT, CODECAPI_AVEncCommonMeanBitRate, CODECAPI_AVEncMPVDefaultBPictureCount, CODECAPI_AVEncMPVGOPSize, CODECAPI_AVEncVideoForceKeyFrame, CODECAPI_AVLowLatencyMode, ICodecAPI, IMFActivate, IMFMediaEventGenerator, IMFTransform, METransformHaveOutput, METransformNeedInput, MFCreateMediaType, MFCreateMemoryBuffer, MFCreateSample, MFStartup, MFTEnumEx, MFMediaType_Video, MFVideoFormat_H264, MFVideoFormat_NV12, MF_E_TRANSFORM_NEED_MORE_INPUT, MF_EVENT_FLAG_NO_WAIT, MF_LOW_LATENCY, MF_MT_AVG_BITRATE, MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE, MF_MT_MPEG2_PROFILE, MF_MT_SUBTYPE, MF_TRANSFORM_ASYNC, MF_TRANSFORM_ASYNC_UNLOCK, MF_VERSION, MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_FLAG_HARDWARE, MFT_ENUM_FLAG_SORTANDFILTER, MFT_ENUM_FLAG_SYNCMFT, MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, MFT_MESSAGE_NOTIFY_START_OF_STREAM, MFT_OUTPUT_DATA_BUFFER, MFT_REGISTER_TYPE_INFO, eAVEncH264VProfile_High, MFSTARTUP_FULL, MFVideoInterlace_Progressive,
     };
     use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoTaskMemFree, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
 
@@ -206,13 +231,16 @@ mod win {
         ((a as u64) << 32) | b as u64
     }
 
+    static SKIP_HW: AtomicBool = AtomicBool::new(false);
+
     pub fn run_session() -> Result<(), String> {
         unsafe {
+            let _ = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
             MFStartup(MF_VERSION, MFSTARTUP_FULL).map_err(|e| format!("MFStartup {e}"))?;
 
             let fps = hub().want.fps.load(Ordering::Relaxed).max(15);
-            let kbps = hub().want.kbps.load(Ordering::Relaxed).max(500);
+            let mut kbps = hub().want.kbps.load(Ordering::Relaxed).max(500);
             let output_idx = hub().want.output.load(Ordering::Relaxed);
 
             let mut device: Option<ID3D11Device> = None;
@@ -236,7 +264,7 @@ mod win {
             let adapter = dxgi.GetAdapter().map_err(|e| format!("GetAdapter {e}"))?;
             let output = adapter.EnumOutputs(output_idx).or_else(|_| adapter.EnumOutputs(0)).map_err(|e| format!("EnumOutputs {e}"))?;
             let output1: IDXGIOutput1 = output.cast().map_err(|e| format!("IDXGIOutput1 {e}"))?;
-            let dup: IDXGIOutputDuplication = output1.DuplicateOutput(&device).map_err(|e| format!("DuplicateOutput {e}"))?;
+            let dup = duplicate_output(&output1, &device)?;
 
             let mut desc = DXGI_OUTPUT_DESC::default();
             let _ = output.GetDesc(&mut desc);
@@ -246,7 +274,10 @@ mod win {
                 w = 1920;
                 h = 1080;
             }
-            let (w, h) = wire::even_size(w, h);
+            let (src_w, src_h) = wire::even_size(w, h);
+            let maxw = hub().want.maxw.load(Ordering::Relaxed);
+            let maxh = hub().want.maxh.load(Ordering::Relaxed);
+            let (w, h) = wire::fit_box(src_w, src_h, maxw, maxh);
             hub().left
                 .store(desc.DesktopCoordinates.left, Ordering::Relaxed);
             hub().top.store(desc.DesktopCoordinates.top, Ordering::Relaxed);
@@ -261,16 +292,32 @@ mod win {
             let hello = json!({
                 "type":"hw-hello","codec":"avc1.640028","width":w,"height":h,"fps":fps,"kbps":kbps,"hw":hw
             });
-            broadcast(wire::pack_packet(wire::KIND_HELLO, 0, 0, hello.to_string().as_bytes()));
+            let hello_pkt = wire::pack_packet(wire::KIND_HELLO, 0, 0, hello.to_string().as_bytes());
+            hub().want.hello.store(false, Ordering::Relaxed);
+            broadcast(hello_pkt.clone());
 
             let mut staging: Option<ID3D11Texture2D> = None;
+            let mut last_nv: Option<Vec<u8>> = None;
+            let mut last_sent = Instant::now();
             let start = Instant::now();
             let frame_dt = Duration::from_micros(1_000_000 / fps.max(1) as u64);
             let mut next = Instant::now();
 
             while hub().want.run.load(Ordering::Relaxed) {
-                if hub().want.fps.load(Ordering::Relaxed) != fps || hub().want.kbps.load(Ordering::Relaxed) != kbps {
+                let want_fps = hub().want.fps.load(Ordering::Relaxed).max(15);
+                let want_kbps = hub().want.kbps.load(Ordering::Relaxed).max(500);
+                if want_fps != fps || hub().want.maxw.load(Ordering::Relaxed) != maxw || hub().want.maxh.load(Ordering::Relaxed) != maxh {
                     break;
+                }
+                if want_kbps != kbps {
+                    if set_u32(&enc, &CODECAPI_AVEncCommonMeanBitRate, want_kbps.saturating_mul(1000)) {
+                        kbps = want_kbps;
+                    } else {
+                        break;
+                    }
+                }
+                if hub().want.hello.swap(false, Ordering::Relaxed) {
+                    broadcast(hello_pkt.clone());
                 }
                 let now = Instant::now();
                 if now < next {
@@ -282,7 +329,17 @@ mod win {
                 let mut resource: Option<IDXGIResource> = None;
                 match dup.AcquireNextFrame(40, &mut info, &mut resource) {
                     Ok(()) => {}
-                    Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => continue,
+                    Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => {
+                        let due = hub().want.idr.load(Ordering::Relaxed) || last_sent.elapsed() >= Duration::from_secs(1);
+                        if due {
+                            if let Some(nv) = last_nv.clone() {
+                                if emit_frame(&enc, &nv, w, h, fps, start.elapsed())? {
+                                    last_sent = Instant::now();
+                                }
+                            }
+                        }
+                        continue;
+                    }
                     Err(e) if e.code() == DXGI_ERROR_ACCESS_LOST => return Err("dxgi access lost".into()),
                     Err(e) => return Err(format!("AcquireNextFrame {e}")),
                 }
@@ -294,6 +351,10 @@ mod win {
                 if staging.is_none() {
                     let mut td = D3D11_TEXTURE2D_DESC::default();
                     tex.GetDesc(&mut td);
+                    if td.Format != DXGI_FORMAT_B8G8R8A8_UNORM {
+                        let _ = dup.ReleaseFrame();
+                        return Err(format!("desktop format {} is not BGRA", td.Format.0));
+                    }
                     td.Usage = D3D11_USAGE_STAGING;
                     td.BindFlags = 0;
                     td.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
@@ -310,56 +371,99 @@ mod win {
                 let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
                 ctx.Map(st, 0, D3D11_MAP_READ, 0, Some(&mut mapped)).map_err(|e| format!("Map {e}"))?;
                 let pitch = mapped.RowPitch as usize;
-                let src = std::slice::from_raw_parts(mapped.pData as *const u8, pitch * h as usize);
-                let nv = wire::bgra_to_nv12(src, pitch, w, h);
+                let src = std::slice::from_raw_parts(mapped.pData as *const u8, pitch * src_h as usize);
                 ctx.Unmap(st, 0);
-
-                let force = hub().want.idr.swap(false, Ordering::Relaxed);
-                if force {
-                    force_key(&enc);
-                }
-                if let Some((au, key)) = encode_nv12(&enc, &nv, w, h, fps, start.elapsed())? {
-                    let flags = if key || force { wire::FLAG_KEY } else { 0 };
-                    let ts = start.elapsed().as_millis() as u32;
-                    broadcast(wire::pack_packet(wire::KIND_VIDEO, flags, ts, &au));
+                let nv = if w == src_w && h == src_h {
+                    wire::bgra_to_nv12(src, pitch, src_w, src_h)
+                } else {
+                    let small = wire::downsample_bgra(src, pitch, src_w, src_h, w, h);
+                    wire::bgra_to_nv12(&small, (w as usize) * 4, w, h)
+                };
+                last_nv = Some(nv);
+                if emit_frame(&enc, last_nv.as_ref().unwrap(), w, h, fps, start.elapsed())? {
+                    last_sent = Instant::now();
                 }
             }
-            hub().ready.store(false, Ordering::Relaxed);
             Ok(())
         }
     }
 
-    unsafe fn open_encoder(w: u32, h: u32, fps: u32, kbps: u32) -> Result<(IMFTransform, bool), String> {
-        if let Ok(enc) = enum_encoder(true).and_then(|e| configure(e, w, h, fps, kbps).map(|e| (e, true))) {
-            return Ok(enc);
+    unsafe fn emit_frame(enc: &IMFTransform, nv: &[u8], w: u32, h: u32, fps: u32, elapsed: Duration) -> Result<bool, String> {
+        let want_idr = hub().want.idr.swap(false, Ordering::Relaxed);
+        if want_idr {
+            force_key(enc);
         }
-        if let Ok(enc) = enum_encoder(false).and_then(|e| configure(e, w, h, fps, kbps).map(|e| (e, false))) {
-            return Ok(enc);
+        let Some((au, key)) = encode_nv12(enc, nv, w, h, fps, elapsed)? else {
+            if want_idr {
+                hub().want.idr.store(true, Ordering::Relaxed);
+            }
+            return Ok(false);
+        };
+        if want_idr && !key {
+            hub().want.idr.store(true, Ordering::Relaxed);
+        }
+        let flags = if key { wire::FLAG_KEY } else { 0 };
+        let ts = elapsed.as_millis() as u32;
+        broadcast(wire::pack_packet(wire::KIND_VIDEO, flags, ts, &au));
+        Ok(true)
+    }
+
+    unsafe fn open_encoder(w: u32, h: u32, fps: u32, kbps: u32) -> Result<(IMFTransform, bool), String> {
+        let mut why = String::new();
+        if !SKIP_HW.load(Ordering::Relaxed) {
+            if let Some(enc) = try_encoders(true, w, h, fps, kbps, &mut why) {
+                eprintln!("[amni-control] hardware encoder");
+                return Ok((enc, true));
+            }
+            if !why.is_empty() {
+                eprintln!("[amni-control] hardware encoder skipped: {why}");
+            }
+        }
+        if let Some(enc) = try_encoders(false, w, h, fps, kbps, &mut why) {
+            return Ok((enc, false));
         }
         let enc: IMFTransform = CoCreateInstance(&CMSH264EncoderMFT, None, CLSCTX_INPROC_SERVER).map_err(|e| format!("CMSH264 {e}"))?;
         configure(enc, w, h, fps, kbps).map(|e| (e, false))
     }
 
-    unsafe fn enum_encoder(hw: bool) -> Result<IMFTransform, String> {
+    unsafe fn try_encoders(hw: bool, w: u32, h: u32, fps: u32, kbps: u32, why: &mut String) -> Option<IMFTransform> {
         let info = MFT_REGISTER_TYPE_INFO { guidMajorType: MFMediaType_Video, guidSubtype: MFVideoFormat_H264 };
         let mut activates: *mut Option<IMFActivate> = std::ptr::null_mut();
         let mut count = 0u32;
         let flags = if hw { MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_SORTANDFILTER } else { MFT_ENUM_FLAG_SYNCMFT | MFT_ENUM_FLAG_SORTANDFILTER };
-        MFTEnumEx(MFT_CATEGORY_VIDEO_ENCODER, flags, None, Some(&info as *const _), &mut activates, &mut count).map_err(|e| format!("MFTEnumEx {e}"))?;
-        if activates.is_null() || count == 0 {
-            return Err("no encoder".into());
+        if MFTEnumEx(MFT_CATEGORY_VIDEO_ENCODER, flags, None, Some(&info as *const _), &mut activates, &mut count).is_err() || activates.is_null() || count == 0 {
+            if !activates.is_null() { CoTaskMemFree(Some(activates as *const _)); }
+            if why.is_empty() { *why = "no encoder".into(); }
+            return None;
         }
-        let first = &*activates;
-        let act = first.clone().ok_or("null activate")?;
-        let enc: IMFTransform = act.ActivateObject::<IMFTransform>().map_err(|e| format!("ActivateObject {e}"))?;
+        let list = std::slice::from_raw_parts_mut(activates, count as usize);
+        let mut acts = Vec::with_capacity(count as usize);
+        for slot in list.iter_mut() {
+            if let Some(act) = slot.take() { acts.push(act); }
+        }
         CoTaskMemFree(Some(activates as *const _));
-        Ok(enc)
+        for act in acts {
+            let enc = match act.ActivateObject::<IMFTransform>() {
+                Ok(enc) => enc,
+                Err(e) => { *why = format!("ActivateObject {e}"); continue; }
+            };
+            match configure(enc, w, h, fps, kbps) {
+                Ok(enc) => return Some(enc),
+                Err(e) => { *why = e; }
+            }
+        }
+        None
     }
 
     unsafe fn configure(enc: IMFTransform, w: u32, h: u32, fps: u32, kbps: u32) -> Result<IMFTransform, String> {
         if let Ok(attrs) = enc.GetAttributes() {
             let _ = attrs.SetUINT32(&MF_LOW_LATENCY, 1);
+            if attrs.GetUINT32(&MF_TRANSFORM_ASYNC).ok().unwrap_or(0) != 0 {
+                attrs.SetUINT32(&MF_TRANSFORM_ASYNC_UNLOCK, 1).map_err(|e| format!("async unlock {e}"))?;
+            }
         }
+        let _ = set_u32(&enc, &CODECAPI_AVLowLatencyMode, 1);
+        let _ = set_u32(&enc, &CODECAPI_AVEncMPVDefaultBPictureCount, 0);
         let out_ty = MFCreateMediaType().map_err(|e| format!("out type {e}"))?;
         out_ty.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video).map_err(|e| format!("{e}"))?;
         out_ty.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_H264).map_err(|e| format!("{e}"))?;
@@ -376,18 +480,45 @@ mod win {
         in_ty.SetUINT64(&MF_MT_FRAME_SIZE, pack2(w, h)).map_err(|e| format!("{e}"))?;
         in_ty.SetUINT64(&MF_MT_FRAME_RATE, pack2(fps, 1)).map_err(|e| format!("{e}"))?;
         in_ty.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32).map_err(|e| format!("{e}"))?;
+        let _ = in_ty.SetUINT32(&MF_MT_DEFAULT_STRIDE, w);
         enc.SetInputType(0, &in_ty, 0).map_err(|e| format!("SetInputType {e}"))?;
 
+        let _ = set_u32(&enc, &CODECAPI_AVEncMPVGOPSize, fps.max(1));
+        let _ = set_u32(&enc, &CODECAPI_AVEncCommonMeanBitRate, kbps.saturating_mul(1000));
         enc.ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0).ok();
         enc.ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0).ok();
         Ok(enc)
     }
 
-    unsafe fn force_key(enc: &IMFTransform) {
-        if let Ok(api) = enc.cast::<ICodecAPI>() {
-            let _ = api.IsSupported(&windows::Win32::Media::MediaFoundation::CODECAPI_AVEncVideoForceKeyFrame);
+    unsafe fn duplicate_output(output1: &IDXGIOutput1, device: &ID3D11Device) -> Result<IDXGIOutputDuplication, String> {
+        if let Ok(output5) = output1.cast::<IDXGIOutput5>() {
+            let formats = [DXGI_FORMAT_B8G8R8A8_UNORM];
+            if let Ok(dup) = output5.DuplicateOutput1(device, 0, &formats) {
+                return Ok(dup);
+            }
         }
-        let _ = enc;
+        output1.DuplicateOutput(device).map_err(|e| format!("DuplicateOutput {e}"))
+    }
+
+    unsafe fn set_u32(enc: &IMFTransform, which: &windows::core::GUID, n: u32) -> bool {
+        let Ok(api) = enc.cast::<ICodecAPI>() else { return false };
+        let v = windows::core::VARIANT::from(n);
+        api.SetValue(which, &v).is_ok()
+    }
+
+    unsafe fn admit_input(enc: &IMFTransform) {
+        let Ok(gen) = enc.cast::<IMFMediaEventGenerator>() else { return };
+        for _ in 0..6 {
+            let Ok(ev) = gen.GetEvent(MF_EVENT_FLAG_NO_WAIT) else { return };
+            let Ok(kind) = ev.GetType() else { continue };
+            if kind == METransformNeedInput.0 as u32 || kind == METransformHaveOutput.0 as u32 {
+                return;
+            }
+        }
+    }
+
+    unsafe fn force_key(enc: &IMFTransform) {
+        let _ = set_u32(enc, &CODECAPI_AVEncVideoForceKeyFrame, 1);
     }
 
     unsafe fn encode_nv12(enc: &IMFTransform, nv: &[u8], _w: u32, _h: u32, fps: u32, elapsed: Duration) -> Result<Option<(Vec<u8>, bool)>, String> {
@@ -406,21 +537,31 @@ mod win {
         let t = (elapsed.as_nanos() / 100) as i64;
         sample.SetSampleTime(t).ok();
         sample.SetSampleDuration((10_000_000 / fps.max(1) as i64) as i64).ok();
-        enc.ProcessInput(0, &sample, 0).map_err(|e| format!("ProcessInput {e}"))?;
+        if enc.ProcessInput(0, &sample, 0).is_err() {
+            admit_input(enc);
+            enc.ProcessInput(0, &sample, 0).map_err(|e| format!("ProcessInput {e}"))?;
+        }
 
         let info = enc.GetOutputStreamInfo(0).unwrap_or_default();
-        let out_sample = MFCreateSample().map_err(|e| format!("out sample {e}"))?;
-        if info.cbSize > 0 {
-            let ob = MFCreateMemoryBuffer(info.cbSize.max(1)).map_err(|e| format!("out buf {e}"))?;
-            out_sample.AddBuffer(&ob).ok();
-        }
+        let async_mft = enc.GetAttributes().ok().and_then(|a| a.GetUINT32(&MF_TRANSFORM_ASYNC).ok()).unwrap_or(0) != 0;
+        let mft_provides = async_mft || (info.dwFlags & 0x100) != 0;
         let mut out = MFT_OUTPUT_DATA_BUFFER::default();
         out.dwStreamID = 0;
-        *out.pSample = Some(out_sample);
+        if !mft_provides {
+            let out_sample = MFCreateSample().map_err(|e| format!("out sample {e}"))?;
+            if info.cbSize > 0 {
+                let ob = MFCreateMemoryBuffer(info.cbSize.max(1)).map_err(|e| format!("out buf {e}"))?;
+                out_sample.AddBuffer(&ob).ok();
+            }
+            *out.pSample = Some(out_sample);
+        }
         let mut status = 0u32;
-        match enc.ProcessOutput(0, std::slice::from_mut(&mut out), &mut status) {
+        let produced = enc.ProcessOutput(0, std::slice::from_mut(&mut out), &mut status);
+        let held = std::mem::ManuallyDrop::take(&mut out.pSample);
+        drop(std::mem::ManuallyDrop::take(&mut out.pEvents));
+        match produced {
             Ok(()) => {
-                let Some(s) = (*out.pSample).as_ref() else { return Ok(None) };
+                let Some(s) = held.as_ref() else { return Ok(None) };
                 let b = s.GetBufferByIndex(0).map_err(|e| format!("GetBuffer {e}"))?;
                 let mut p = std::ptr::null_mut();
                 let mut len = 0u32;
@@ -430,11 +571,16 @@ mod win {
                 if bytes.is_empty() {
                     return Ok(None);
                 }
-                let key = wire::annexb_is_key(&bytes);
+                let key = wire::au_is_key(&bytes);
                 Ok(Some((bytes, key)))
             }
             Err(e) if e.code() == MF_E_TRANSFORM_NEED_MORE_INPUT => Ok(None),
-            Err(e) => Err(format!("ProcessOutput {e}")),
+            Err(e) => {
+                if async_mft {
+                    SKIP_HW.store(true, Ordering::Relaxed);
+                }
+                Err(format!("ProcessOutput {e}"))
+            }
         }
     }
 }

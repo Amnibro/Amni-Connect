@@ -51,6 +51,11 @@ let videoClient = null;
 let videoBuf = Buffer.alloc(0);
 let helloWait = null;
 let hwPending = false;
+let hwPendingAt = 0;
+let hwWanted = false;
+let hwDead = false;
+let lastDegraded = '';
+let rustReady = false;
 let tray = null;
 let trayHost = false;
 let trayOccupancy = 0;
@@ -128,6 +133,7 @@ function showWindow() {
 }
 function hideWindow() {
   if (!mainWindow) return;
+  try { mainWindow.webContents.setBackgroundThrottling(false); } catch (_) {}
   mainWindow.setSkipTaskbar(true);
   mainWindow.hide();
 }
@@ -182,9 +188,16 @@ function onRustData(buf) {
   String(buf).split('\n').filter(Boolean).forEach(line => {
     let msg = null;
     try { msg = JSON.parse(line); } catch (_) { return; }
+    if (msg.type === 'capture-status') {
+      const reason = String(msg.reason || '').trim();
+      hwWanted && msg.ok === false && reason && !hwDead && (hwDead = true, hostLog(`hardware capture stopped: ${reason}`), mainWindow?.webContents.send('hw-dead', { reason }));
+      msg.ok && (hwDead = false);
+      return;
+    }
     if (msg.type !== 'pong') return;
     if (msg.elevated === false && elevatedTask && !mediumReplaced) { mediumReplaced = true; hostLog('adopted daemon is medium integrity - restarting through the elevated task'); return restartRust('medium-integrity daemon'); }
-    (msg.direct || msg.errs > 0 || msg.misses > 0) && hostStatus(`Input backend degraded: errs=${msg.errs} misses=${msg.misses} direct=${msg.direct} ${msg.last || ''}`);
+    const degraded = msg.errs > 0 || msg.misses > 0 ? `Input backend degraded: errs=${msg.errs} misses=${msg.misses} direct=${msg.direct} ${msg.last || ''}`.trim() : msg.direct ? 'Input backend is driving the cursor directly' : '';
+    degraded !== lastDegraded && (lastDegraded = degraded, degraded && hostStatus(degraded));
   });
 }
 function startPing() {
@@ -192,6 +205,7 @@ function startPing() {
   pingTimer = setInterval(() => {
     if (!rustClient || rustClient.destroyed) return;
     try { rustClient.write(JSON.stringify({ type: 'ping' }) + '\n'); } catch (_) {}
+    hwWanted && rustWrite({ type: 'capture-status' });
     lastPong && Date.now() - lastPong > PONG_DEADLINE_MS && restartRust('no pong');
   }, PING_MS);
 }
@@ -248,6 +262,7 @@ function rustWrite(obj) {
 
 function onVideoData(chunk) {
   videoBuf = Buffer.concat([videoBuf, chunk]);
+  let sentVideo = false;
   while (videoBuf.length >= 16) {
     if (videoBuf.readUInt32LE(0) !== HW_MAGIC) { videoBuf = videoBuf.subarray(1); continue; }
     const len = videoBuf.readUInt32LE(4);
@@ -263,30 +278,34 @@ function onVideoData(chunk) {
       try { msg = JSON.parse(payload.toString('utf8')); } catch (_) {}
       const fn = helloWait; helloWait = null; fn({ ok: true, ...msg });
     }
-    if (kind === 2 && !(flags & 1) && hwPending) continue;
-    hwPending = kind === 2;
+    if (kind === 2 && !(flags & 1) && hwPending && Date.now() - hwPendingAt < 80) continue;
+    if (kind === 2) sentVideo = true;
     mainWindow?.webContents.send('hw-video', { kind, flags, ts, payload });
   }
+  if (sentVideo) { hwPending = true; hwPendingAt = Date.now(); }
 }
 
 function connectVideoClient() {
   if (videoClient && !videoClient.destroyed) return;
-  videoClient = new net.Socket();
+  const stale = videoClient;
+  stale && (stale.removeAllListeners(), stale.destroy());
+  const sock = new net.Socket();
+  videoClient = sock;
   videoBuf = Buffer.alloc(0);
-  videoClient.on('data', onVideoData);
-  videoClient.on('error', () => {});
-  videoClient.on('close', () => { videoClient = null; });
-  videoClient.connect(VIDEO_PORT, '127.0.0.1');
+  sock.on('data', (chunk) => videoClient === sock && onVideoData(chunk));
+  sock.on('error', () => {});
+  sock.on('close', () => { videoClient === sock && (videoClient = null); });
+  sock.connect(VIDEO_PORT, '127.0.0.1');
 }
 
 function connectRustClient() {
   rustClient?.removeAllListeners();
   rustClient?.destroy();
   rustClient = new net.Socket();
-  rustClient.on('connect', () => { lastPong = Date.now(); startPing(); rustWrite({ type: 'ping' }); hostStatus('Rust input backend connected'); connectVideoClient(); });
+  rustClient.on('connect', () => { lastPong = Date.now(); rustReady = true; startPing(); rustWrite({ type: 'ping' }); hostStatus('Rust input backend connected'); connectVideoClient(); });
   rustClient.on('data', onRustData);
   rustClient.on('error', () => {});
-  rustClient.on('close', scheduleReconnect);
+  rustClient.on('close', () => { rustReady = false; scheduleReconnect(); });
   rustClient.connect(RUST_PORT, '127.0.0.1');
 }
 
@@ -484,7 +503,24 @@ ipcMain.handle('get-local-ip', () => {
 // this size, so keep it small: it is a picker tile, not the stream.
 const THUMB_SIZE = { width: 480, height: 270 };
 
-ipcMain.handle('get-sources', async () => {
+// On a Wayland session Chromium lists screens through the xdg-desktop-portal:
+// every getSources() opens a new ScreenCast session (KDE asks which screen to
+// share) and returns one "Entire screen" for whatever was picked. Polling it
+// for thumbnails piled up portal sessions, a failed one crashed Electron, and
+// the in-app picker could not choose a screen anyway. The UI asks once, when
+// hosting starts, and lets the desktop dialog do the picking.
+const PORTAL_CAPTURE = process.platform === 'linux'
+  && (process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY);
+ipcMain.handle('capture-mode', () => ({ portal: PORTAL_CAPTURE }));
+
+// One capturer call at a time: overlapping portal sessions are what KDE refused.
+let sourcesInFlight = null;
+ipcMain.handle('get-sources', () => {
+  if (!sourcesInFlight) sourcesInFlight = listSources().finally(() => { sourcesInFlight = null; });
+  return sourcesInFlight;
+});
+
+async function listSources() {
   try {
     const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: THUMB_SIZE });
     let displays = [], primaryId = null;
@@ -510,9 +546,10 @@ ipcMain.handle('get-sources', async () => {
     });
   } catch (e) {
     console.error('[amni-connect] desktopCapturer failed:', e && e.message ? e.message : e);
+    hostLog('desktopCapturer failed: ' + (e && e.message ? e.message : e));
     return [];
   }
-});
+}
 
 let inputGate = { locked: false, viewOnly: false };
 let lastP2pAt = 0;
@@ -536,21 +573,30 @@ function writeInput(event, src) {
 ipcMain.on('send-input-event', (_, event) => { writeInput(event, 'p2p'); });
 ipcMain.handle('send-input-event', (_, event) => ({ status: writeInput(event, 'p2p') ? 'sent' : 'no-backend' }));
 ipcMain.on('input-gate', (_, g) => { inputGate = { locked: !!(g && g.locked), viewOnly: !!(g && g.viewOnly) }; });
-ipcMain.on('hw-frame-ack', () => { hwPending = false; });
+ipcMain.on('hw-frame-ack', () => { hwPending = false; hwPendingAt = 0; });
 ipcMain.on('renderer-log', (_, msg) => hostLog('ui ' + String(msg).slice(0, 400)));
 
 ipcMain.handle('read-clipboard', () => clipboard.readText());
 ipcMain.handle('write-clipboard', (_, text) => clipboard.writeText(text));
-ipcMain.handle('start-hw-capture', (_, opts) => new Promise((resolve) => {
-  const t = setTimeout(() => { if (helloWait) { helloWait = null; rustWrite({ type: 'capture-stop' }); resolve({ ok: false, reason: 'timeout' }); } }, 2800);
-  helloWait = (msg) => { clearTimeout(t); resolve(msg); };
+function waitRust(ms) {
+  return rustReady ? Promise.resolve(true) : new Promise((resolve) => {
+    const at = Date.now();
+    const iv = setInterval(() => rustReady || Date.now() - at > ms ? (clearInterval(iv), resolve(rustReady)) : null, 100);
+  });
+}
+// The Rust capturer is Windows-only; elsewhere it answers "unsupported", but
+// only after the video client and hello timeout, which cost ~3 s per start.
+ipcMain.handle('start-hw-capture', async (_, opts) => process.platform !== 'win32' ? { ok: false, reason: 'unsupported' } : (await waitRust(5000), new Promise((resolve) => {
+  const done = (r) => { hwWanted = hwWanted || !!(r && r.ok); hwDead = false; resolve(r); };
+  const t = setTimeout(() => { if (helloWait) { helloWait = null; done({ ok: false, reason: 'timeout' }); } }, 2800);
+  helloWait = (msg) => { clearTimeout(t); done(msg); };
   connectVideoClient();
   if (!rustWrite({ type: 'capture-start', fps: opts?.fps, kbps: opts?.kbps, output: opts?.output || 0 })) {
-    clearTimeout(t); helloWait = null; resolve({ ok: false, reason: 'no-backend' });
+    clearTimeout(t); helloWait = null; done({ ok: false, reason: 'no-backend' });
   }
-}));
+})));
 ipcMain.handle('update-hw-capture', (_, opts) => { rustWrite({ type: 'capture-update', fps: opts?.fps, kbps: opts?.kbps }); return { status: 'sent' }; });
-ipcMain.handle('stop-hw-capture', () => { rustWrite({ type: 'capture-stop' }); return { status: 'sent' }; });
+ipcMain.handle('stop-hw-capture', () => { hwWanted = false; hwDead = false; rustWrite({ type: 'capture-stop' }); return { status: 'sent' }; });
 ipcMain.handle('hw-idr', () => { rustWrite({ type: 'capture-idr' }); return { status: 'sent' }; });
 ipcMain.handle('hide-to-tray', (_, label) => {
   if (!ensureTray(label || 'Amni-Connect · hosting')) return { status: 'no-tray' };

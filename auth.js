@@ -18,7 +18,8 @@ function createAuth(dataRoot) {
   const enrollTokens = new Map(), challenges = new Map();
   const sweep = () => { const now = Date.now(); for (const [k, v] of enrollTokens) v.exp < now && enrollTokens.delete(k); for (const [k, v] of challenges) v.exp < now && challenges.delete(k); };
   const hostOf = (h) => String((h && (h['x-forwarded-host'] || h.host)) || '').split(',')[0].trim().toLowerCase().replace(/:\d+$/, '');
-  const isRemote = (h) => !!hostname() && (hostOf(h) === hostname() || !!(h && h['cf-connecting-ip']));
+  // Anything Cloudflare forwarded is remote even when tunnel.json is absent (system cloudflared).
+  const isRemote = (h) => !!(h && h['cf-connecting-ip']) || (!!hostname() && hostOf(h) === hostname());
   const isLoopback = (req) => /^(::1|127\.0\.0\.1|::ffff:127\.0\.0\.1)$/.test(req.socket?.remoteAddress || '') && !isRemote(req.headers);
   const cookieOf = (h) => { const m = String((h && h.cookie) || '').match(new RegExp('(?:^|;\\s*)' + COOKIE + '=([^;]+)')); return m ? m[1] : ''; };
   const session = (h) => {

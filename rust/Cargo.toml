@@ -1,6 +1,6 @@
 [package]
 name = "amni-control"
-version = "0.1.0"
+version = "1.6.14"
 edition = "2021"
 license-file = "../LICENSE"
 description = "Rust input daemon for Amni-Connect (E2EE remote desktop)"

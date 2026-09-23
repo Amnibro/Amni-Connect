@@ -77,6 +77,49 @@ button.danger{background:#ef4444}
 .kb-key{min-height:34px;padding:8px 0;font-size:14px}
 }
 </style>
+<style id="amni-scient-brand">
+/* AMNI-SCIENT brand layer (same identity as amni-scient.com and the host window's ui/brand/amni-scient.css):
+   graphite surfaces, brass for chrome, Connect green for live/primary, 4/3/2 radii, hairlines not glows.
+   Inline because the phone only receives /viewer from server.js. */
+:root{--paper:#0B0D10;--surface:#111418;--sunk:#0D0F12;--panel2:#161A20;--ink:#EDEFF2;--mut:#8E959E;--line:#20242B;--line2:#2E343D;
+--brand:#C89B4E;--brand-soft:#E2BC7C;--brand-dim:rgba(200,155,78,.10);--you:#34D399;--you-ink:#04150E;--acc-dim:rgba(52,211,153,.12);--bad:#FF6B6B;
+--sans:"Archivo","Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;--mono:"JetBrains Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;color-scheme:dark}
+body{font-family:var(--sans)}
+::selection{background:var(--brand-dim);color:var(--ink)}
+:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+.logo{display:inline-flex;align-items:center;gap:9px;font-stretch:80%;font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.14em;color:var(--ink)}
+.logo::before{content:"";width:7px;height:7px;background:var(--you);flex:0 0 auto}
+.card{border-radius:4px;border-color:var(--line);background-image:linear-gradient(160deg,rgba(255,255,255,.028),rgba(255,255,255,.005) 58%,transparent)}
+label{color:var(--mut);font-stretch:80%;font-weight:650;font-size:10.5px;letter-spacing:.14em}
+input{border-radius:3px;border-color:var(--line2);font-family:var(--sans)}
+input:focus{border-color:var(--brand)}
+button{border-radius:3px;font-family:var(--sans);font-weight:650;letter-spacing:.03em}
+button:active{background:#2BB885}
+button.danger{background:transparent;color:var(--bad);border:1px solid color-mix(in srgb,var(--bad) 45%,var(--line2))}
+#status-bar{background:color-mix(in srgb,var(--sunk) 94%,transparent);border-bottom-color:var(--line);font-family:var(--sans)}
+#link-chips span{font-family:var(--mono);border-radius:2px;background:var(--paper)}
+#link-chips span.ok{color:var(--you);border-color:color-mix(in srgb,var(--you) 35%,var(--line))}
+#link-chips span.bad{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 35%,var(--line))}
+#link-chips span.warn{color:var(--brand);border-color:color-mix(in srgb,var(--brand) 35%,var(--line))}
+#signal-pill{border-radius:2px;background:var(--paper);border:1px solid var(--line);font-stretch:85%;text-transform:uppercase;letter-spacing:.1em}
+/* Toolbar: one graphite family with hairlines; color only where it means something. */
+#toolbar{background:rgba(11,13,16,.86);border-top:1px solid var(--line)}
+#toolbar button{background:var(--panel2)!important;color:var(--ink);border:1px solid var(--line2);border-radius:3px}
+#toolbar button:active{background:var(--surface)!important;border-color:var(--brand)}
+#toolbar #paste-btn{border-color:color-mix(in srgb,var(--you) 45%,var(--line2));color:var(--you)}
+#toolbar #dc-btn{border-color:color-mix(in srgb,var(--bad) 50%,var(--line2));color:var(--bad)}
+#keyboard-bar,#clipboard-bar,#file-progress{background:rgba(11,13,16,.94);border-top:1px solid var(--line)}
+#kb-text{background:var(--sunk);border:1px solid var(--line2);border-radius:3px;font-family:var(--mono)}
+.kb-clear-btn{background:var(--panel2);border:1px solid var(--line2);border-radius:3px}
+.mod-btn,.kb-key{background:var(--panel2);border:1px solid var(--line);border-radius:3px;color:var(--ink)}
+.kb-key.kb-mod{background:var(--sunk)}
+.mod-btn.active,.kb-key:active,.kb-key.kb-mod.active{background:var(--brand);color:#120C03;border-color:var(--brand)}
+.kb-key.kb-mod.locked{background:var(--you);color:var(--you-ink);border-color:var(--you)}
+#drag-indicator{background:var(--brand);color:#120C03;border-radius:2px;box-shadow:none;font-stretch:80%;letter-spacing:.14em;text-transform:uppercase}
+#toast{background:rgba(17,20,24,.94);border:1px solid var(--line2);border-radius:3px}
+@media (min-width:820px){#toolbar,#keyboard-bar,#clipboard-bar{border-radius:4px 4px 0 0;border:1px solid var(--line);border-bottom:0}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+</style>
 </head>
 <body>
 
@@ -319,26 +362,26 @@ function ensureHwDec(w, h, codec) {
       }
       ctx.drawImage(frame, 0, 0);
       frame.close();
+      if (!hwUsing) useHwSurface(true);
     },
-    error: () => { hwDec = null; }
+    error: () => { hwDec = null; useHwSurface(false); }
   });
   try {
     hwDec.configure({ codec: codec || 'avc1.640028', codedWidth: hwCanvas.width, codedHeight: hwCanvas.height, optimizeForLatency: true, hardwareAcceleration: 'prefer-hardware' });
   } catch (e) { hwDec = null; return null; }
-  useHwSurface(true);
   return hwDec;
 }
 function assembleScreen(buf) {
   const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   if (u8.byteLength < 6) return null;
   const kind = u8[0], flags = u8[1], seq = new DataView(u8.buffer, u8.byteOffset, u8.byteLength).getUint32(2, true);
-  if (kind === 1) return { au: u8.subarray(6), key: !!(flags & 1) };
+  if (kind === 1) return { au: u8.slice(6), key: !!(flags & 1) };
   if (kind !== 2 || u8.byteLength < 10) return null;
   const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
   const idx = dv.getUint16(6, true), total = dv.getUint16(8, true);
   let rec = hwParts.get(seq);
   if (!rec) { rec = { flags, total, got: [] }; hwParts.set(seq, rec); }
-  rec.got[idx] = u8.subarray(10);
+  rec.got[idx] = u8.slice(10);
   if (rec.got.filter(Boolean).length < total) return null;
   let n = 0; rec.got.forEach(p => n += p.byteLength);
   const au = new Uint8Array(n); let o = 0;
@@ -350,11 +393,20 @@ function assembleScreen(buf) {
 function onScreenPacket(data) {
   const assembled = assembleScreen(data instanceof ArrayBuffer ? new Uint8Array(data) : data);
   if (!assembled) return;
+  if (assembled.key && hwDec && hwDec.state !== 'configured') {
+    try { hwDec.close(); } catch (e) {}
+    hwDec = null;
+  }
+  if (!assembled.key && (!hwDec || hwDec.state !== 'configured')) return;
   const dec = ensureHwDec(0, 0, 'avc1.640028');
   if (!dec || dec.state === 'closed') return;
   try {
     dec.decode(new EncodedVideoChunk({ type: assembled.key ? 'key' : 'delta', timestamp: performance.now() * 1000, data: assembled.au }));
-  } catch (e) {}
+  } catch (e) {
+    try { dec.close(); } catch (e2) {}
+    hwDec = null;
+    return;
+  }
   setStatus('Streaming \u25cf Live');
 }
 let socket, pc, roomId;
@@ -438,7 +490,8 @@ function connect() {
     createPC();
   });
   socket.on('error', (msg) => setStatus(`Error: ${msg}`));
-  socket.on('offer', async ({ offer }) => {
+  socket.on('offer', async ({ offer, to }) => {
+    if (to && socket.id && to !== socket.id) return;
     if (!pc) createPC();
     await setRemoteMunged(offer);
     preferDesktopCodecs(pc);
@@ -446,10 +499,10 @@ function connect() {
     socket.emit('answer', { roomId, answer });
     setStatus('WebRTC negotiating\u2026');
   });
-  socket.on('answer', async ({ answer }) => { if (pc) await setRemoteMunged(answer); });
+  socket.on('answer', async ({ answer, to }) => { if (pc && !(to && socket.id && to !== socket.id)) await setRemoteMunged(answer); });
   socket.on('your-lan', (ip) => { ourLan = ip || ourLan; });
   socket.on('peer-lan', (ip) => { peerLan = ip || peerLan; });
-  socket.on('ice-candidate', ({ candidate }) => addIce(candidate));
+  socket.on('ice-candidate', ({ candidate, to }) => { if (!(to && socket.id && to !== socket.id)) addIce(candidate); });
   socket.on('input-dropped', (d) => {
     const now = Date.now();
     if (now - inputWarnedAt > 4000) { inputWarnedAt = now; showToast(d.reason === 'no-room' ? 'Host room gone - reconnecting' : 'Host offline - input not applied'); }
@@ -510,10 +563,13 @@ function createPC() {
     else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') { stopViewerStats(); recoverPc(); }
     else if (pc.connectionState === 'closed') stopViewerStats();
   };
-  pc.ontrack = ({ streams }) => {
+  pc.ontrack = ({ track, streams }) => {
+    if (track.kind !== 'video') return;
     const v = document.getElementById('remote-video');
+    v.muted = true;
+    v.playsInline = true;
     v.srcObject = streams[0];
-    v.play().catch(()=>{});
+    v.play().catch(() => {});
     layoutMediaFit();
     setStatus('Streaming \u25cf Live');
     startViewerStats();
@@ -524,7 +580,12 @@ function createPC() {
       e.channel.onmessage = (ev) => { if (typeof ev.data !== 'string') onScreenPacket(ev.data); };
       return;
     }
-    if (e.channel.label === 'input') { inputChannel = e.channel; inputChannel.onopen = () => paintLinkChips(); return; }
+    if (e.channel.label === 'input') {
+      inputChannel = e.channel;
+      inputChannel.onopen = () => { paintLinkChips(); try { inputChannel.send(JSON.stringify({ type: 'viewer-caps', hw: typeof VideoDecoder === 'function' })); } catch (err) {} };
+      if (inputChannel.readyState === 'open') inputChannel.onopen();
+      return;
+    }
     if (e.channel.label === 'move') { moveChannel = e.channel; moveChannel.onopen = () => paintLinkChips(); return; }
     dataChannel = e.channel;
     dataChannel.onopen = () => setStatus('WebRTC: connected (Data+Video)');

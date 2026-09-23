@@ -1,5 +1,81 @@
 # Amni-Connect Changelog
 
+## v1.6.18 - Amni-Scient look for the host window and the phone viewer (2026-09-22)
+
+### Changed
+- **Host window and phone viewer now wear the amni-scient.com identity.** Graphite surfaces with hairline borders instead of slate cards and glows, brass for chrome and wayfinding, Connect green (the site's `--p-connect`) for primary and live state, Archivo condensed caps for the app bar, eyebrows, tabs and labels, mono for the room code, stats, chips and log, and 4/3/2 px radii. The leftover Braid purple and indigo accents are gone.
+- The host window loads `ui/brand/amni-scient.css` after its inline sheet (Archivo variable fonts bundled in `ui/brand/fonts/`, so it renders offline). The phone viewer carries the same layer inline in `viewer.html`, because the server only sends `/viewer`.
+- The status badge is a quiet chip with a state dot. `setStatus()` still sets its background color, and the brand layer maps that color to the dot, so no script changed.
+- Viewer toolbar buttons are one graphite family. Color is kept only where it means something: Paste in green, Disconnect in red.
+
+## v1.6.17 - sharing starts on Wayland, End session lets you rename the room, the main screen is the default (2026-09-22)
+
+### Fixed
+- **Starting to share on a Wayland desktop failed or crashed the app.** On Wayland Chromium lists screens through the xdg-desktop-portal, so every `getSources()` opened a new ScreenCast session (KDE's "share your screen" dialog). The picker called it on launch and every 3 s for thumbnails, the calls overlapped the real capture, KDE refused them, and Electron 33 died after the failed portal call. On Wayland the app no longer lists screens in the background: the picker says the desktop will ask, and Start opens the portal once. Cancelling it logs "Screen sharing was cancelled" and leaves you on the host screen. `get-sources` also runs one capturer call at a time on every platform.
+- **Start could hang or run twice.** A second click started a second capture while the first was still waiting, and any capture error left the page stuck half-started. Start is single-flight, and a failure stops what was opened and logs why.
+- **Changing the room name after ending a session.** "End session" reloads the page, and a saved room name then started hosting again straight away, before the name could be edited. Hosting from a saved name now happens only when the app launches.
+- **Default screen.** With no choice made the picker took the first screen the OS listed. It now takes the screen you shared last, else the MAIN display. The hardware capture output index follows the screen actually chosen.
+- **Every Linux start waited ~3 s for hardware capture.** The Rust capturer is Windows-only; Linux now falls back to Chromium capture immediately.
+
+## v1.6.16 - every phone in the room gets its own connection (2026-09-22)
+
+### Fixed
+- **A second viewer joining knocked the first one off.** The host held a single `pc`; `viewer-joined` for a new id ran `createPC()`, which closed the live connection, so the earlier phone lost video and its input channels and only the newest join could ever click or type. The host now keeps one `RTCPeerConnection` per viewer id (`peers` map, `createPeer`), offers are addressed with `to: viewerId`, answers and ICE pick the right pc by `from`, and `viewer-left` drops only that viewer. Screen access units and clipboard sync fan out to every open channel, bitrate applies to every sender, and the absolute-move sequence is tracked per viewer so two phones do not mark each other's moves stale.
+- **Signaling was a broadcast.** `server.js` sent `offer` / `answer` / `ice-candidate` to the whole room, so with two viewers each phone also applied the other phone's answer to its own connection. Host packets now go to the addressed socket (or the room when `to` is missing, so an older viewer page still works), viewer packets go to the host only, and every relayed packet carries `from`. `viewer.html` ignores anything addressed to another socket.
+- HW policy with mixed phones: hardware H264 frames are sent when any viewer can decode them, the Chromium video track is disabled only when all of them can, and hardware capture stops only when nobody needs it.
+
+### Tests
+- `tests/test_multi_viewer.js` (21 checks): static wiring plus a live signaling run with a host and two viewers on :33995. `tests/test_rooms.js` still all ok.
+
+### Notes
+- `amni-control.exe` is unchanged and still reports `v1.6.14`.
+
+## v1.6.15 - one video socket, and a rebuild gap stops counting as a death (2026-09-21)
+
+### Fixed
+- **Mouse worked, the screen stayed black.** The host held two Established connections on `127.0.0.1:7879` against one on `:7878`, and both video sockets ran `on('data', onVideoData)` into the single shared `videoBuf`. The parser read a frame length from one stream and its payload from the other, failed the ANC1 magic check and resynchronised a byte at a time, so nothing decodable ever reached the viewer while input, which rides the control socket, kept working perfectly. `connectVideoClient` now replaces the stale socket instead of abandoning it, and both the `data` and `close` handlers check socket identity, so a late `close` from a dead socket can no longer null the reference to the live one and invite a third connection.
+- **A failed arm stopped a healthy capture.** The 2800 ms hello timeout in `start-hw-capture` sent `capture-stop`, which sets `want.run = false` in the daemon. If the hello was merely late, that killed a session that was about to deliver. The timeout now reports the failure and leaves the session alone.
+- **A failed re-arm silenced the health poll.** `done` overwrote `hwWanted` with the result of the attempt, so one bad arm turned off the `capture-status` poll while the renderer was still on the hardware path, leaving nothing watching. `hwWanted` now stays set until `stop-hw-capture` clears it.
+
+### Tests
+- `tests/test_video_socket_single.js` drives `connectVideoClient` through the daemon-restart sequence against a fake ANC1 server that writes each frame in two chunks. On `backups/main.js.v1.6.14_pre_video_socket.bak` the host opens 3 sockets, leaves 2 open and delivers a frame spliced from both. On the patched host it opens one socket at a time and the frame arrives whole.
+
+### Notes
+- `amni-control.exe` is unchanged, so the daemon still reports `v1.6.14`. The daemon accepts unlimited `:7879` clients and broadcasts to all of them; a single-consumer policy there would make this whole class of bug impossible and is worth doing next time the exe is rebuilt.
+
+## v1.6.14 - hardware capture stops leaking, the input banner stops repeating (2026-09-21)
+
+### Fixed
+- **Hardware capture died 19 seconds into every session and dropped the screen onto the slow Chromium path.** `encode_nv12` handed the encoder an `MFT_OUTPUT_DATA_BUFFER` whose `pSample` and `pEvents` are `ManuallyDrop` fields in windows-rs 0.56, so nothing ever released them. One `IMFSample` plus its output buffer leaked per encoded frame, 60 times a second, until `MFCreateMemoryBuffer` answered `0x8007000E`. Anthony's 2026-09-21 log shows it exactly: capture up at `18:11:21.592Z`, `capture membuf Not enough memory resources are available`, renderer on `HW capture failed - Chromium desktop capture` at `18:11:40.910Z`. Both fields are now taken and dropped every frame, including on the `ProcessOutput` error paths.
+- **`enum_encoder` leaked every encoder it did not pick.** `MFTEnumEx` returns a CoTaskMem array of `IMFActivate`; the old code cloned entry 0, freed the array and let the rest of the interface pointers leak, and leaked all of them when `ActivateObject` failed. Each entry is released now, and the array is freed on the no-encoder path too.
+- **The input banner repeated a frozen line every 5 seconds.** `misses` resets the moment a move lands but `last` was never cleared, and `main.js` re-logged whenever `direct` was true, so the panel filled with `misses=0 ... move did not land ... misses=1` forever. The daemon clears `last` when a move lands, and the host only writes a status line when the state actually changes.
+- **Physical mouse movement was scored as a failed remote move.** `verify()` only ever ran from the next `move_to`, so a pending target could be judged minutes later against wherever Anthony had since moved his own mouse - enough false misses to flip the backend to `SetCursorPos` for no reason. A move is now judged only between `SETTLE_MS` and `STALE_MS` (60-400 ms) and is dropped, uncounted, once it is older than that.
+- **A mid-session capture death was permanent.** Nothing polled capture health and the renderer had no way to hear about it, so one failure meant Chromium capture for the rest of the session. The host polls `capture-status` on the 5 s ping while capture is meant to be running, sends `hw-dead` once per death, and the renderer re-arms hardware capture three times before it gives up.
+- **The daemon banner lied about its version.** It printed a hardcoded `v1.5.16`; it now prints `CARGO_PKG_VERSION`, and the crate version tracks the app at 1.6.14.
+- **The phone sat on a black canvas while the host said capture was on.** A bitrate tick tore the DXGI session down before it encoded a frame, the health poll treated that empty gap as a capture death, and the frame stash then threw away the only keyframe (`slice(-12)`). The viewer decoder never got an IDR, so the canvas stayed black. Bitrate now updates on the live encoder, a status with no reason does not count as a death, the stash keeps the keyframe, and a key request actually sets `CODECAPI_AVEncVideoForceKeyFrame`. Desktop duplication also asks for BGRA, so an HDR desktop is not copied into an uninitialized black texture.
+- **Mouse kept working and the picture did not.** After the Chromium crash fix, the desktop stayed on the hardware path and was no longer a WebRTC video track. That path was an unreliable, low-priority data channel, so pointer traffic crowded it out and a static desktop never repeated a keyframe. The screen channel is reliable again, a still screen re-sends a frame once a second, and length-prefixed H264 keyframes count as keys.
+
+### Added
+- `AMNI_CTL_PORT` and `AMNI_VIDEO_PORT` env overrides so a test daemon runs on its own ports and never touches the live one on 7878/7879.
+
+### Tests
+- `tests/test_capture_no_leak.js` spawns the daemon on isolated ports with its own `APPDATA`, holds 60 fps capture for 30 s and requires no out-of-memory in the daemon log, working-set growth under 60 MB and video still flowing after the first 10 s. Against a build that differs only by the missing `ManuallyDrop::take` it fails with `oom=true capture-error=true`; against 1.6.14 it passes at 3 MB growth over 30 s.
+- `tests/test_degrade_status.js` carves the real `onRustData` out of `main.js` and drives it with pongs. It requires one status line per state change, exactly one `hw-dead` per capture death, and no `hw-dead` when the status reason is empty. On `backups/main.js.v1.6.13_pre_capture_rearm.bak` it fails three ways: 6 lines for 6 identical pongs, a healed backend still called degraded, and no capture death reaching the renderer.
+- `rust` unit tests cover `land_verdict` - settling, landed, missed, stale and both window edges - and `env_port` junk handling. 14 Rust tests pass.
+
+## v1.6.13 — hardware capture survives the audio request (2026-09-21)
+
+### Fixed
+- **Every session fell back to Chromium capture, which is why input felt laggy.** The host opened DXGI/H264 hardware capture, then asked for desktop audio with `getUserMedia({ audio: { mandatory: { chromeMediaSource: 'desktop' } }, video: false })`. Chromium kills a renderer that asks for desktop audio with no video constraint (`bad_message.cc` reason 263, exit 3), so the window died 7–23 ms after capture came up, every time, in all four hardware-capture sessions in `host.log`. `captureDesktopAudioOnly` now asks for a 2×2 @ 1 fps video track alongside the audio, stops and removes that track, and keeps the audio. The renderer stays alive and the host keeps the hardware path.
+- **A reloaded renderer could never re-attach to a live capture session.** `amni-control` sent `hw-hello` once, when the capture session opened. After the renderer died and reloaded, `start-hw-capture` waited 2800 ms for a hello that was never coming, gave up, and the whole session ran on the software path. `capture-start` against an already-running session now re-broadcasts the hello.
+- **Cold boot asked for hardware capture before the elevated daemon had connected.** The window auto-hosts about half a second after it loads; `amni-control` connected 380 ms later in the 16:17 boot, so `start-hw-capture` answered `no-backend` immediately and the session ran on Chromium capture. Across the whole of `host.log` that is 13 `no-backend` and 7 `timeout` against 5 hardware starts. `main.js` now tracks the control socket with `rustReady` and waits up to 5000 ms for it before giving up.
+- **The fallback path was pinned to full resolution.** `lockEncodeParams` set `degradationPreference: 'maintain-resolution'` and `scaleResolutionDownBy = 1`, so the software encoder held 3440×1440 and paid for it in framerate whenever it could not keep up. Both are `balanced` now and the scale override is gone, so a struggling encoder trades pixels for frames.
+
+### Tests
+- `tests/test_desktop_audio_capture.js` runs the shipped `captureDesktopAudioOnly` inside real Electron and requires a live audio track, zero video tracks and no `render-process-gone`. It fails on `backups/index.html.v1.6.12_pre_hw_audio_fix.bak`.
+- `tests/test_hw_capture_waits_for_backend.js` requires a >= 3000 ms wait budget and readiness tracked on connect/close. It fails on `backups/main.js.v1.6.13_pre_backend_wait.bak`.
+- `tests/test_hello_rebroadcast.js` spawns the daemon, sends `capture-start` twice on one session and requires a second `hw-hello`. It fails on `backups/amni-control.exe.installed_v1.6.12_pre_hello_rebroadcast.bak`.
+
 ## v1.6.12 — see who is in the session, and boot them (2026-09-17)
 
 ### Added

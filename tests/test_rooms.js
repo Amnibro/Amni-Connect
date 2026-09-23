@@ -13,7 +13,7 @@ const ok = (name, cond) => { console.log((cond ? 'ok' : 'FAIL') + ' ' + name); c
 ok('rooms stay after the host socket drops', /Keep the room/.test(serverJs) && !/HOST_GRACE_MS/.test(serverJs));
 ok('last room code is persisted', /room\.json/.test(serverJs) && /loadStickyRoom/.test(serverJs));
 ok('host republishes the room on a timer', /_roomPulse/.test(indexHtml));
-ok('a new viewer still gets an offer while another pc is live', /lastViewerId/.test(indexHtml) && /info\.id === lastViewerId/.test(indexHtml));
+ok('every viewer gets its own peer connection', /const peers = new Map\(\)/.test(indexHtml) && /peers\.get\(info\.id\)/.test(indexHtml) && /to: viewerId/.test(indexHtml));
 ok('host paints occupancy and can boot', /sessionPeople/.test(indexHtml) && /bootViewer/.test(indexHtml) && /kick-viewer/.test(indexHtml));
 ok('viewer stops and does not rejoin after a kick', /socket\.on\('kicked'/.test(viewerHtml) && /The host ended your session/.test(viewerHtml) && /wantStay = false/.test(viewerHtml));
 ok('signaling boots only from the host', /kick-viewer/.test(serverJs) && /viewer-left/.test(serverJs) && /session-viewers/.test(serverJs));

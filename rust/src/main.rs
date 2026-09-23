@@ -15,6 +15,11 @@ const LAND_TOL: i32 = 4;
 const MISS_DIRECT: u32 = 3;
 const MISS_FATAL: u32 = 8;
 const SETTLE_MS: u64 = 60;
+const STALE_MS: u64 = 400;
+const V_EARLY: i8 = -1;
+const V_STALE: i8 = 0;
+const V_LAND: i8 = 1;
+const V_MISS: i8 = 2;
 const STUCK_TICKS: u32 = 5;
 #[derive(Serialize, Deserialize, Debug)]
 struct InputEvent {
@@ -175,14 +180,20 @@ impl Ctl {
     }
     fn verify(&mut self) {
         let Some((tx, ty, t)) = self.pending else { return };
-        if t.elapsed() < Duration::from_millis(SETTLE_MS) {
+        let age = t.elapsed().as_millis() as u64;
+        if land_verdict(age, 0, 0) == V_EARLY {
             return;
         }
         self.pending = None;
         let Ok((cx, cy)) = self.eng.location() else { return };
-        if (cx - tx).abs() <= LAND_TOL && (cy - ty).abs() <= LAND_TOL {
-            self.misses = 0;
-            return;
+        match land_verdict(age, cx - tx, cy - ty) {
+            V_LAND => {
+                self.misses = 0;
+                self.last.starts_with("move did not land").then(|| self.last.clear());
+                return;
+            }
+            V_MISS => {}
+            _ => return,
         }
         self.misses += 1;
         self.last = format!("move did not land target={tx},{ty} cursor={cx},{cy} misses={}", self.misses);
@@ -384,6 +395,16 @@ fn capture_command(line: &str) -> Option<String> {
     }
 }
 
+pub fn land_verdict(age_ms: u64, dx: i32, dy: i32) -> i8 {
+    match age_ms {
+        a if a < SETTLE_MS => V_EARLY,
+        a if a > STALE_MS => V_STALE,
+        _ => (dx.abs() <= LAND_TOL && dy.abs() <= LAND_TOL).then_some(V_LAND).unwrap_or(V_MISS),
+    }
+}
+pub fn env_port(key: &str, fallback: u16) -> u16 {
+    std::env::var(key).ok().and_then(|v| v.parse::<u16>().ok()).filter(|p| *p > 0).unwrap_or(fallback)
+}
 fn spawn_watchdog(ctl: Arc<Mutex<Ctl>>) {
     std::thread::spawn(move || {
         let mut stuck = 0;
@@ -430,12 +451,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ctl = Arc::new(Mutex::new(Ctl::new()?));
     {
         let c = lock_ctl(&ctl);
-        eprintln!("[amni-control] v1.5.16 ready display {}x{} dpi-aware={}", c.sw, c.sh, dpi);
+        eprintln!("[amni-control] v{} ready display {}x{} dpi-aware={}", env!("CARGO_PKG_VERSION"), c.sw, c.sh, dpi);
     }
     spawn_watchdog(Arc::clone(&ctl));
     #[cfg(windows)]
     capture::spawn();
-    let listener = TcpListener::bind("127.0.0.1:7878").await?;
+    let listener = TcpListener::bind(("127.0.0.1", env_port("AMNI_CTL_PORT", 7878))).await?;
     loop {
         let (stream, _) = listener.accept().await?;
         let ctl = Arc::clone(&ctl);
@@ -449,7 +470,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     continue;
                 }
-                let Ok(ev) = serde_json::from_str::<InputEvent>(&line) else { continue };
+                let Ok(ev) = serde_json::from_str::<InputEvent>(&line) else {
+                    // a non-JSON line is a foreign protocol (e.g. a web page POSTing HTTP at this port) - drop it before any body line is replayed as input
+                    if serde_json::from_str::<serde_json::Value>(&line).is_err() {
+                        break;
+                    }
+                    continue;
+                };
                 let reply = {
                     let mut c = lock_ctl(&ctl);
                     apply(&mut c, &ev)
@@ -520,5 +547,39 @@ mod tests {
             (pw, ph),
             "main_display must report physical pixels or normalized 1.0 lands short by the DPI scale"
         );
+    }
+}
+#[cfg(test)]
+mod verdict_tests {
+    use super::*;
+    #[test]
+    fn a_move_still_settling_is_not_judged() {
+        assert_eq!(land_verdict(10, 500, 500), V_EARLY);
+    }
+    #[test]
+    fn a_landed_move_clears_the_miss_counter() {
+        assert_eq!(land_verdict(80, 2, -3), V_LAND);
+    }
+    #[test]
+    fn a_move_that_missed_inside_the_window_counts() {
+        assert_eq!(land_verdict(80, 95, 156), V_MISS);
+    }
+    #[test]
+    fn anthony_touching_his_own_mouse_later_is_not_a_miss() {
+        assert_eq!(land_verdict(90_000, 95, 156), V_STALE);
+        assert_eq!(land_verdict(STALE_MS + 1, 95, 156), V_STALE);
+    }
+    #[test]
+    fn the_window_edges_stay_judgeable() {
+        assert_eq!(land_verdict(SETTLE_MS, 0, 0), V_LAND);
+        assert_eq!(land_verdict(STALE_MS, 99, 0), V_MISS);
+    }
+    #[test]
+    fn env_port_falls_back_on_junk() {
+        assert_eq!(env_port("AMNI_PORT_TEST_UNSET_KEY", 7878), 7878);
+        std::env::set_var("AMNI_PORT_TEST_KEY", "0");
+        assert_eq!(env_port("AMNI_PORT_TEST_KEY", 7878), 7878);
+        std::env::set_var("AMNI_PORT_TEST_KEY", "7979");
+        assert_eq!(env_port("AMNI_PORT_TEST_KEY", 7878), 7979);
     }
 }

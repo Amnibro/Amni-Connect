@@ -1,5 +1,20 @@
 # Amni-Connect Architecture Map
 
+## 2026-09-22 v1.6.16 one peer connection per viewer
+
+- **`index.html` host:** `peers: Map<viewerId, {pc, input, move, clip, screen, hw, moveSeq, iceTries, busy}>`, built by `createPeer(id)`. `pc` is now only the "primary" (most recently connected) peer for the stats loop and `autoTick`; everything that sends iterates `peerList()` / `peerPcs()`. `offerViewer` emits `{ roomId, offer, to: viewerId }`; `emitIce(candidate, to)`; `answer` and `ice-candidate` resolve the pc with `pcFor(from)`. `viewer-left` → `dropViewerPc(id)`; `maybeOfferNext` offers every `sessionViewers` entry without a live pc. `createPC()` is join-mode only (this app as a viewer).
+- **Fan-out:** `screenOuts()` = open screen channels of HW-capable peers; `sendScreenAu` sends each access unit to all of them and stashes only when none is open. `flushScreenStash(ch)` is per channel. Clipboard sync sends to every open `clip`. `staleMove(seq, peer)` keeps `peer.moveSeq`.
+- **HW policy:** `viewerHw` = any peer on HW (send frames); video track disabled only when all peers are on HW; `stopHwCapture` only when none.
+- **`server.js`:** `route(ev)` for `offer` / `answer` / `ice-candidate`: host → `socket.to(data.to)` or the room; viewer → `room.host`; all packets get `from: socket.id`. **`viewer.html`** ignores packets whose `to` is another socket.
+- Test: `tests/test_multi_viewer.js`. Checklist: `docs/checklists/checklist_multi_viewer_v1.6.16.md`.
+
+## 2026-09-21 v1.6.13 hardware capture stays up
+
+- **`index.html` `captureDesktopAudioOnly(sourceId)`:** desktop audio is requested with a 2×2 @ 1 fps decoy video track, which is stopped and removed before the stream is used. Desktop audio with `video: false` is a Chromium `bad_message` kill (reason 263, exit 3), and on the hardware path that kill took the whole renderer down 7–23 ms after capture opened. A failure here logs and leaves `localStream = null`; video still flows.
+- **`index.html` `lockEncodeParams`:** `degradationPreference` is `balanced` on the sender and the encoding, and `scaleResolutionDownBy` is no longer forced to 1. `encodeWasDownscaled` still detects adaptation from the sent-vs-source width.
+- **`main.js` `waitRust(ms)` + `rustReady`:** `start-hw-capture` awaits the control socket for up to 5000 ms before it answers `no-backend`. The renderer auto-hosts ~0.5 s after load and the elevated daemon connects ~0.4 s after that, so without the wait a cold boot always took the Chromium path. `rustReady` is set in the `connect` handler and cleared in `close`.
+- **`rust/src/capture.rs`:** `Want.hello` is a new flag. `capture-start` on a session that is already running and ready sets it; the session loop swaps it and re-broadcasts the same `KIND_HELLO` packet. `capture-stop` clears it. Without this a renderer reload after a crash waited out the 2800 ms `start-hw-capture` timeout in `main.js` and ran the rest of the session on Chromium capture.
+
 ## 2026-09-17 v1.6.12 session occupancy + boot
 
 - **`server.js`:** `viewerInfo` / `session-viewers` / `viewer-left`. Host-only `kick-viewer` emits `kicked` then disconnects. `GET /rooms` (loopback) now includes `people`.
@@ -353,3 +368,40 @@ phone (viewer.html file input) → `XMLHttpRequest` POST multipart `:3389/upload
 - `backups/<file>.<version|date>.bak` before any edit
 - `docs/checklists/checklist_<task>_v<version>.md` per task
 - `CHANGELOG.md` at repo root
+
+## Hardware capture and input health (v1.6.14)
+- `rust/src/capture.rs` owns DXGI Desktop Duplication plus a Media Foundation H264 encoder and
+  serves ANC1 frames on 127.0.0.1:7879 (`AMNI_VIDEO_PORT` overrides it). `rust/src/main.rs` owns
+  enigo input on 127.0.0.1:7878 (`AMNI_CTL_PORT` overrides it). Both overrides exist so tests run
+  an isolated daemon and never probe the live one.
+- `encode_nv12` must take and drop `MFT_OUTPUT_DATA_BUFFER.pSample` and `.pEvents` on every call.
+  They are `ManuallyDrop` in windows-rs 0.56, so a plain read leaks an `IMFSample` and its buffer
+  per frame; at 60 fps that reached `E_OUTOFMEMORY` in 19 seconds and killed the hardware path.
+- `land_verdict(age_ms, dx, dy)` is the single decision for whether a remote move landed. Only the
+  60-400 ms window is judged: younger is still settling, older is Anthony's own hand on the mouse
+  and is dropped uncounted. `verify()` is the only caller and runs from `move_to`.
+- `Ctl::status()` reports `errs`, `misses`, `direct` and `last`. `last` is cleared when a move
+  lands, so a healed backend stops advertising an old fault.
+- `main.js` writes an input status line only when that state string changes, and while capture is
+  meant to be running it polls `capture-status` on the 5 s ping. A capture that reports `ok:false`
+  sends `hw-dead` once; `index.html` re-arms `start-hw-capture` up to three times with the stored
+  `hwOpts` before it tells the viewer the screen is on the slow path.
+- Tests: `tests/test_capture_no_leak.js`, `tests/test_degrade_status.js`, `cargo test` in `rust/`.
+
+## The host holds exactly one video socket (v1.6.15)
+- `main.js` parses ANC1 frames out of one module-level `videoBuf`, so two connections to `:7879` are
+  not a redundancy, they are a shredder: lengths from one stream, payloads from the other, a failed
+  magic check and a byte-at-a-time resync that never recovers. Input rides `:7878` and is untouched,
+  which is why the symptom reads as "mouse fine, no video".
+- `connectVideoClient()` replaces the stale socket (`removeAllListeners` then `destroy`) and guards
+  both `data` and `close` on `videoClient === sock`. Without the identity guard, a late `close` from
+  a socket destroyed during a daemon restart nulls the reference to the live socket, and the next
+  call opens a third one alongside it.
+- Diagnosing this class of fault: `Get-NetTCPConnection -LocalPort 7878,7879`. One Established
+  connection on each is healthy. More on `:7879` than on `:7878` is the shredder.
+- Capture death is signalled by a non-empty `reason` in `capture-status`, never by `ok:false` alone.
+  `status_json()` fills `reason` from `last_err` and `set_err("")` clears it at the top of every
+  session, so a not-ready poll with an empty reason means the encoder is rebuilding. Treating it as
+  a death makes the renderer re-arm during a normal gap, and each re-arm calls `connectVideoClient`.
+- A failed arm must not send `capture-stop`, and must not clear `hwWanted`. The first kills a session
+  whose hello was merely late; the second turns off the poll that would have noticed.

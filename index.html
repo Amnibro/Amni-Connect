@@ -132,6 +132,7 @@
         .settings-grid .toggle-row { padding: 6px 0; border-bottom: 1px solid #1e293b; }
         .settings-grid .toggle-row:nth-last-child(-n+2) { border-bottom: none; }
     </style>
+    <link rel="stylesheet" href="ui/brand/amni-scient.css">
 </head>
 <body>
     <div class="container">
@@ -296,27 +297,32 @@
             if (!desc || !ip || !desc.sdp || !/\.local/i.test(desc.sdp)) return desc;
             return { type: desc.type, sdp: desc.sdp.replace(/[A-Za-z0-9\-]+\.local/gi, ip) };
         }
-        async function setLocalMunged(desc) {
+        async function setLocalMunged(desc, p = pc) {
             const d = mungeSdp({ type: desc.type, sdp: desc.sdp }, ourLan);
-            await pc.setLocalDescription(d);
+            await p.setLocalDescription(d);
             return d;
         }
-        async function setRemoteMunged(desc) {
-            await pc.setRemoteDescription(new RTCSessionDescription(mungeSdp({ type: desc.type, sdp: desc.sdp }, peerLan)));
+        async function setRemoteMunged(desc, p = pc) {
+            await p.setRemoteDescription(new RTCSessionDescription(mungeSdp({ type: desc.type, sdp: desc.sdp }, peerLan)));
         }
-        function emitIce(candidate) {
+        function emitIce(candidate, to) {
             if (!candidate || !socket || !roomId) return;
             const init = candidate.toJSON ? candidate.toJSON() : candidate;
-            socket.emit('ice-candidate', { roomId, candidate: init });
+            socket.emit('ice-candidate', { roomId, candidate: init, to });
             const extra = rewriteLocal(init, ourLan);
-            if (extra) socket.emit('ice-candidate', { roomId, candidate: extra });
+            if (extra) socket.emit('ice-candidate', { roomId, candidate: extra, to });
         }
-        function addIce(candidate) {
-            if (!pc || !candidate) return;
-            pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+        function addIce(candidate, p = pc) {
+            if (!p || !candidate) return;
+            p.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
             const extra = rewriteLocal(candidate, peerLan);
-            if (extra) pc.addIceCandidate(new RTCIceCandidate(extra)).catch(() => {});
+            if (extra) p.addIceCandidate(new RTCIceCandidate(extra)).catch(() => {});
         }
+        const peers = new Map();
+        const peerList = () => [...peers.values()];
+        const peerPcs = () => isHost ? peerList().map(p => p.pc) : (pc ? [pc] : []);
+        const pcFor = (from) => isHost && from && peers.get(from) ? peers.get(from).pc : pc;
+        const isLive = (p) => !!p && (p.connectionState === 'connected' || p.connectionState === 'connecting');
         let socket, pc, localStream, roomId, isHost = false, inputLocked = false;
         const logEl = document.getElementById('log');
         const statusEl = document.getElementById('status');
@@ -349,8 +355,8 @@
         updateQualityLabel();
 
         const AB = { enabled: true, lastLoss: 0, lastRtt: 0, lastAvail: 0, lastQlim: 'none', priorPacketsLost: 0, priorPacketsRcvd: 0, lan: false, icePath: '', userTouched: false, lanApplied: false };
-        const LAN_FLOOR_KBPS = 16000, WAN_DEFAULT_KBPS = 12000, SCREEN_CHUNK = 60000;
-        let hwPath = false, screenChannel = null, inputChannel = null, moveChannel = null, lastMoveSeq = 0, joinSeq = 0, hwSeq = 0, hwStash = [];
+        const LAN_FLOOR_KBPS = 16000, WAN_DEFAULT_KBPS = 12000, SCREEN_CHUNK = 12000;
+        let hwPath = false, hwOpts = null, hwReviving = false, screenChannel = null, inputChannel = null, moveChannel = null, lastMoveSeq = 0, joinSeq = 0, hwSeq = 0, hwStash = [];
         let userClickedHost = false;
         function pasteChord() {
             return [
@@ -369,15 +375,28 @@
         }
         // Absolute moves carry a viewer sequence number; the `move` channel is unordered, so a
         // late packet must not drag the cursor back. A restart (viewer reload) resets the counter.
-        function staleMove(seq) {
+        function staleMove(seq, peer) {
             if (typeof seq !== 'number') return false;
-            if (seq <= lastMoveSeq && lastMoveSeq - seq < 10000) return true;
-            lastMoveSeq = seq;
+            const last = peer ? peer.moveSeq : lastMoveSeq;
+            if (seq <= last && last - seq < 10000) return true;
+            peer ? peer.moveSeq = seq : lastMoveSeq = seq;
             return false;
         }
-        function applyViewerMsg(data) {
+        let viewerHw = false;
+        function applyViewerMsg(data, peer) {
+            if (data.type === 'viewer-caps') {
+                if (peer) peer.hw = !!data.hw;
+                const hwPeers = peerList().filter(p => p.hw).length;
+                viewerHw = peer ? hwPeers > 0 : !!data.hw;
+                const allHw = peer ? hwPeers === peers.size : viewerHw;
+                if (!viewerHw) window.electronAPI?.stopHwCapture?.();
+                peerPcs().forEach(c => c.getSenders().forEach(s => { if (s.track && s.track.kind === 'video') s.track.enabled = !allHw; }));
+                if (!allHw) applyStreamSettings();
+                log((peer ? 'Viewer ' + peer.id.slice(0, 6) + ' ' : 'Viewer ') + (data.hw ? 'can decode hardware frames' : 'needs the normal video track') + (peers.size > 1 ? ' (' + hwPeers + '/' + peers.size + ' on HW)' : ''));
+                return;
+            }
             if (data.type === 'input') {
-                if (data.ev && data.ev.type === 'mouse-move') { inCount.moves++; if (staleMove(data.seq)) { inCount.stale++; return; } }
+                if (data.ev && data.ev.type === 'mouse-move') { inCount.moves++; if (staleMove(data.seq, peer)) { inCount.stale++; return; } }
                 if (isHost && !inputLocked && !document.getElementById('viewOnlyToggle').checked) window.electronAPI.sendInputEvent(data.ev);
                 return;
             }
@@ -402,7 +421,14 @@
         }
         function tuneVideoTrack(track) {
             if (!track) return;
-            try { track.contentHint = 'detail'; } catch (e) {}
+            try { track.contentHint = 'motion'; } catch (e) {}
+        }
+        async function captureDesktopAudioOnly(sourceId) {
+            const video = { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sourceId, maxWidth: 2, maxHeight: 2, maxFrameRate: 1 } };
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: { mandatory: { chromeMediaSource: 'desktop' } }, video });
+            stream.getVideoTracks().forEach(t => { try { t.stop(); } catch (e) {} stream.removeTrack(t); });
+            if (!stream.getAudioTracks().length) throw new Error('no desktop audio track');
+            return stream;
         }
         function onUserStreamChange() { AB.userTouched = true; applyStreamSettings(); }
         function applyLanProfile() {
@@ -439,33 +465,50 @@
             }
             return parts;
         }
+        let screenSendErr = '';
+        function rememberScreen(parts, key) {
+            if (key) hwStash = parts;
+            else if (hwStash.length) hwStash.push(...parts);
+            else return;
+            if (hwStash.length <= 40) return;
+            let keyEnd = 0;
+            while (keyEnd < hwStash.length && (hwStash[keyEnd][1] & 1)) keyEnd++;
+            const tail = hwStash.slice(Math.max(keyEnd, hwStash.length - 8)).filter(p => !(p[1] & 1));
+            hwStash = hwStash.slice(0, keyEnd).concat(tail);
+        }
+        function hwFrameSize() {
+            return getResolution() || fitCaptureRes({ width: 1920, height: 1080 }) || { width: 1920, height: 1080 };
+        }
+        const screenOuts = () => isHost ? peerList().filter(p => p.hw && p.screen && p.screen.readyState === 'open').map(p => p.screen) : (screenChannel && screenChannel.readyState === 'open' ? [screenChannel] : []);
         function sendScreenAu(au, key) {
+            if (!viewerHw) { window.electronAPI?.ackHwFrame?.(); return; }
             const seq = ++hwSeq;
             const parts = packScreenPackets(au, key, seq);
             try {
-                if (!screenChannel || screenChannel.readyState !== 'open') {
-                    if (key) hwStash = parts;
-                    else if (hwStash.length) hwStash.push(...parts);
-                    if (hwStash.length > 40) hwStash = hwStash.slice(-12);
+                const outs = screenOuts();
+                if (!outs.length) {
+                    rememberScreen(parts, key);
                     return;
                 }
-                if (!key && screenChannel.bufferedAmount > 256000) return;
-                parts.forEach(p => { try { screenChannel.send(p); } catch (e) {} });
+                outs.forEach(ch => {
+                    if (!key && ch.bufferedAmount > 100000) return;
+                    parts.forEach(p => { try { ch.send(p); } catch (e) { const m = String((e && e.message) || e); if (m !== screenSendErr) { screenSendErr = m; window.electronAPI?.logLine?.('screen send failed: ' + m); } } });
+                });
             } finally {
                 window.electronAPI?.ackHwFrame?.();
             }
         }
-        function flushScreenStash() {
-            if (!screenChannel || screenChannel.readyState !== 'open') return;
-            hwStash.forEach(p => { try { screenChannel.send(p); } catch (e) {} });
+        function flushScreenStash(ch) {
+            if (!ch || ch.readyState !== 'open') return;
+            hwStash.forEach(p => { try { ch.send(p); } catch (e) {} });
             hwStash = [];
             window.electronAPI?.requestHwIdr?.();
         }
-        function setupScreenChannel(ch) {
-            screenChannel = ch;
+        function setupScreenChannel(ch, peer) {
+            peer ? peer.screen = ch : screenChannel = ch;
             ch.binaryType = 'arraybuffer';
-            ch.onopen = () => { log('HW screen channel open'); flushScreenStash(); paintHostChips(); };
-            ch.onclose = () => { if (screenChannel === ch) screenChannel = null; };
+            ch.onopen = () => { log('HW screen channel open' + (peer ? ' (' + peer.id.slice(0, 6) + ')' : '')); flushScreenStash(ch); paintHostChips(); };
+            ch.onclose = () => { peer ? (peer.screen === ch && (peer.screen = null)) : (screenChannel === ch && (screenChannel = null)); };
         }
         function hwPayloadBytes(p) {
             if (!p) return new Uint8Array(0);
@@ -525,7 +568,7 @@
             const rttBad = AB.lastRtt > 0.25, rttOk = AB.lastRtt > 0 && AB.lastRtt < 0.06;
             const cpuLim = AB.lastQlim === 'cpu', bwLim = AB.lastQlim === 'bandwidth';
             let next = cur;
-            if (lossBad || rttBad || bwLim) next = Math.max(500, Math.round(cur * 0.82));
+            if (lossBad || rttBad || bwLim) next = Math.max(4000, Math.round(cur * 0.82));
             else if (lossOk && rttOk && !cpuLim) next = Math.min(20000, cur + 500);
             if (AB.lan) next = Math.max(next, LAN_FLOOR_KBPS);
             if (AB.lastAvail > 0 && !AB.lan) next = Math.min(next, Math.max(500, Math.round(AB.lastAvail / 1000 * 0.92)));
@@ -559,15 +602,14 @@
 
         async function applyStreamSettings() {
             if (!localStream) return;
-            const res = getResolution();
+            const box = hwFrameSize();
             const fps = parseInt(document.getElementById('fpsSelect').value);
             const audioOn = document.getElementById('audioToggle').checked;
-            const constraints = { frameRate: { ideal: fps } };
-            if (res) { constraints.width = { ideal: res.width }; constraints.height = { ideal: res.height }; }
+            const constraints = { frameRate: { ideal: fps, max: fps }, width: { max: box.width }, height: { max: box.height } };
             const vt = localStream.getVideoTracks()[0];
             if (vt) {
                 tuneVideoTrack(vt);
-                try { await vt.applyConstraints(constraints); log(`Stream: ${res ? res.width + '×' + res.height : 'native'} @ ${fps}fps`); } catch(e) { log('Constraint apply failed: ' + e.message, 'error'); }
+                try { await vt.applyConstraints(constraints); log(`Stream: ${box.width}×${box.height} @ ${fps}fps`); } catch(e) { log('Constraint apply failed: ' + e.message, 'error'); }
             }
             localStream.getAudioTracks().forEach(t => { t.enabled = audioOn; });
             applyBitrate();
@@ -575,10 +617,13 @@
 
         function lockEncodeParams(params, kbps) {
             if (!params.encodings || !params.encodings.length) params.encodings = [{}];
-            params.degradationPreference = 'maintain-resolution';
-            params.encodings[0].degradationPreference = 'maintain-resolution';
+            params.degradationPreference = 'maintain-framerate';
+            params.encodings[0].degradationPreference = 'maintain-framerate';
             params.encodings[0].scaleResolutionDownBy = 1;
-            if (kbps > 0) params.encodings[0].maxBitrate = kbps * 1000;
+            if (kbps > 0) {
+                params.encodings[0].maxBitrate = kbps * 1000;
+                params.encodings[0].minBitrate = Math.min(kbps, 6000) * 1000;
+            }
             return params;
         }
         function encodeWasDownscaled(params, sentW, srcW) {
@@ -589,12 +634,15 @@
         function applyBitrate() {
             if (!pc) return;
             const kbps = parseInt(document.getElementById('qualitySlider').value);
-            pc.getSenders().forEach(async sender => {
+            peerPcs().forEach(c => c.getSenders().forEach(async sender => {
                 if (sender.track?.kind !== 'video') return;
                 const params = lockEncodeParams(sender.getParameters(), kbps);
                 try { await sender.setParameters(params); } catch(e) {}
-            });
-            if (hwPath) window.electronAPI?.updateHwCapture?.({ fps: parseInt(document.getElementById('fpsSelect').value), kbps });
+            }));
+            if (hwPath) {
+                const box = hwFrameSize();
+                window.electronAPI?.updateHwCapture?.({ fps: parseInt(document.getElementById('fpsSelect').value), kbps, width: box.width, height: box.height });
+            }
         }
         function onTrayToggle() {
             const on = document.getElementById('trayToggle').checked;
@@ -633,21 +681,22 @@
                 socket.emit('answer', { roomId, answer });
                 log('WebRTC answer sent');
             });
-            socket.on('answer', async ({ answer }) => {
-                if (pc) await setRemoteMunged(answer);
-                log('WebRTC answer received', 'success');
+            socket.on('answer', async ({ answer, from }) => {
+                const target = pcFor(from);
+                if (target) await setRemoteMunged(answer, target);
+                log('WebRTC answer received' + (isHost && from ? ' (' + String(from).slice(0, 6) + ')' : ''), 'success');
             });
             socket.on('your-lan', (ip) => { ourLan = ip || ourLan; });
             socket.on('peer-lan', (ip) => { peerLan = ip || peerLan; });
-            socket.on('ice-candidate', ({ candidate }) => addIce(candidate));
+            socket.on('ice-candidate', ({ candidate, from }) => addIce(candidate, pcFor(from)));
             socket.on('host-disconnected', () => { log('Host disconnected', 'error'); setStatus('Disconnected', '#ef4444'); });
             socket.on('viewer-joined', async (payload) => {
                 if (!isHost || !roomId) return;
                 const info = viewerInfoOf(payload);
                 if (!info.id) return;
                 rememberViewer(info);
-                const live = pc && (pc.connectionState === 'connected' || pc.connectionState === 'connecting');
-                if (live && info.id === lastViewerId) {
+                const peer = peers.get(info.id);
+                if (peer && isLive(peer.pc)) {
                     log('Viewer re-joined signaling — keeping live WebRTC');
                     return;
                 }
@@ -656,7 +705,7 @@
             socket.on('viewer-left', (payload) => {
                 const id = viewerInfoOf(payload).id;
                 if (id) sessionViewers.delete(id);
-                if (id && id === lastViewerId) dropViewerPc();
+                if (id) dropViewerPc(id);
                 paintOccupancy();
                 maybeOfferNext();
             });
@@ -726,49 +775,77 @@
             socket.emit('kick-viewer', { roomId, viewerId: want });
             log('Booted ' + who);
         }
-        function dropViewerPc() {
-            try { pc?.close(); } catch (_) {}
-            pc = null;
-            lastViewerId = '';
+        function dropViewerPc(id) {
+            (id ? [peers.get(id)].filter(Boolean) : peerList()).forEach(p => { try { p.pc.close(); } catch (_) {} peers.delete(p.id); });
+            const rest = peerList();
+            pc = rest.length ? rest[rest.length - 1].pc : null;
+            lastViewerId = rest.length ? rest[rest.length - 1].id : '';
+            if (!rest.length) viewerHw = false;
             paintHostChips();
         }
         async function offerViewer(viewerId) {
             lastViewerId = viewerId || '';
             try { window.electronAPI.sendInputEvent({ type: 'reset-mods' }); } catch (_) {}
-            log('Viewer joined — sending offer');
-            createPC();
-            const offer = await setLocalMunged(await pc.createOffer());
-            socket.emit('offer', { roomId, offer });
+            log('Viewer joined — sending offer' + (peers.size ? ' (' + (peers.size + 1) + ' in session)' : ''));
+            const peer = createPeer(viewerId);
+            const offer = await setLocalMunged(await peer.pc.createOffer(), peer.pc);
+            socket.emit('offer', { roomId, offer, to: viewerId });
         }
         function maybeOfferNext() {
             if (!isHost || !roomId || !sessionViewers.size) return;
-            const live = pc && (pc.connectionState === 'connected' || pc.connectionState === 'connecting');
-            if (live) return;
-            const next = sessionViewers.values().next().value;
-            if (next) offerViewer(next.id);
+            sessionViewers.forEach((v) => { const p = peers.get(v.id); if (!p || !isLive(p.pc)) offerViewer(v.id); });
         }
         function paintHostChips() {
             const sig = document.getElementById('chipSig');
             const rtc = document.getElementById('chipRtc');
             const inn = document.getElementById('chipIn');
             if (sig) sig.textContent = socket && socket.connected ? 'sig up' : 'sig down';
-            const st = pc ? pc.connectionState : 'idle';
+            const up = peerPcs().filter(c => c.connectionState === 'connected').length;
+            const st = isHost ? (peers.size ? (peers.size === 1 ? pc.connectionState : up + '/' + peers.size + ' up') : 'idle') : (pc ? pc.connectionState : 'idle');
             if (rtc) rtc.textContent = 'rtc ' + st + (AB.icePath ? ' ' + AB.icePath : '');
-            const inOpen = dataChannel && dataChannel.readyState === 'open';
+            const inOpen = isHost ? peerList().some(p => p.input && p.input.readyState === 'open') : (dataChannel && dataChannel.readyState === 'open');
             if (inn) inn.textContent = inOpen ? 'input p2p' : (socket && socket.connected ? 'input relay' : 'input none');
         }
-        async function recoverHostPc() {
-            if (hostRecoverBusy || !pc) return;
-            hostRecoverBusy = true;
+        async function recoverHostPc(peer) {
+            const c = peer ? peer.pc : pc;
+            if (!c || (peer ? peer.busy : hostRecoverBusy)) return;
+            peer ? peer.busy = true : hostRecoverBusy = true;
             try {
-                if (hostIceTries < 3) {
-                    hostIceTries++;
-                    log('ICE restart ' + hostIceTries);
-                    const offer = await setLocalMunged(await pc.createOffer({ iceRestart: true }));
-                    socket.emit('offer', { roomId, offer });
+                const tries = peer ? peer.iceTries : hostIceTries;
+                if (tries < 3) {
+                    peer ? peer.iceTries++ : hostIceTries++;
+                    log('ICE restart ' + (tries + 1) + (peer ? ' (' + peer.id.slice(0, 6) + ')' : ''));
+                    const offer = await setLocalMunged(await c.createOffer({ iceRestart: true }), c);
+                    socket.emit('offer', { roomId, offer, to: peer ? peer.id : undefined });
                 }
             } catch (e) { log('ICE restart failed: ' + e.message, 'error'); }
-            finally { hostRecoverBusy = false; paintHostChips(); }
+            finally { peer ? peer.busy = false : hostRecoverBusy = false; paintHostChips(); }
+        }
+        function createPeer(id) {
+            const old = peers.get(id);
+            try { old?.pc.close(); } catch (_) {}
+            const peer = { id, pc: new RTCPeerConnection({ iceServers: ICE_SERVERS, iceCandidatePoolSize: 4 }), input: null, move: null, clip: null, screen: null, hw: false, moveSeq: 0, iceTries: 0, busy: false };
+            peers.set(id, peer);
+            pc = peer.pc;
+            peer.pc.onicecandidate = ({ candidate }) => emitIce(candidate, id);
+            peer.pc.onconnectionstatechange = () => {
+                const st = peer.pc.connectionState;
+                log(`WebRTC ${id.slice(0, 6)}: ${st}`);
+                paintHostChips();
+                if (st === 'connected') { pc = peer.pc; startStatsLoop(); }
+                else if (st === 'failed' || st === 'disconnected') recoverHostPc(peer);
+            };
+            peer.input = peer.pc.createDataChannel('input', { ordered: true, priority: 'high' });
+            setupDataChannel(peer.input, peer);
+            peer.move = peer.pc.createDataChannel('move', { ordered: false, maxRetransmits: 0, priority: 'high' });
+            setupDataChannel(peer.move, peer);
+            peer.clip = peer.pc.createDataChannel('clipboard', { ordered: true });
+            setupDataChannel(peer.clip, peer);
+            setupScreenChannel(peer.pc.createDataChannel('screen', { ordered: true }), peer);
+            if (localStream) localStream.getTracks().forEach(t => peer.pc.addTrack(t, localStream));
+            preferDesktopCodecs(peer.pc);
+            applyBitrate();
+            return peer;
         }
         function createPC() {
             try { pc?.close(); } catch (_) {}
@@ -787,41 +864,31 @@
                 log('Remote desktop stream connected', 'success');
                 setStatus('Viewing \u2022 E2EE', '#22c55e');
             };
-            if (isHost) {
-                inputChannel = pc.createDataChannel('input', { ordered: true, priority: 'high' });
-                setupDataChannel(inputChannel);
-                moveChannel = pc.createDataChannel('move', { ordered: false, maxRetransmits: 0, priority: 'high' });
-                setupDataChannel(moveChannel);
-                dataChannel = pc.createDataChannel('clipboard', { ordered: true });
-                setupDataChannel(dataChannel);
-                setupScreenChannel(pc.createDataChannel('screen', { ordered: false, maxRetransmits: 0, priority: 'low' }));
-            } else {
-                pc.ondatachannel = (e) => {
-                    if (e.channel.label === 'screen') setupScreenChannel(e.channel);
-                    else if (e.channel.label === 'input') { inputChannel = e.channel; setupDataChannel(inputChannel); }
-                    else if (e.channel.label === 'move') { moveChannel = e.channel; }
-                    else { dataChannel = e.channel; setupDataChannel(dataChannel); }
-                };
-            }
-            if (isHost && localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+            pc.ondatachannel = (e) => {
+                if (e.channel.label === 'screen') setupScreenChannel(e.channel);
+                else if (e.channel.label === 'input') { inputChannel = e.channel; setupDataChannel(inputChannel); }
+                else if (e.channel.label === 'move') { moveChannel = e.channel; }
+                else { dataChannel = e.channel; setupDataChannel(dataChannel); }
+            };
             preferDesktopCodecs(pc);
             applyBitrate();
         }
 
-        function setupDataChannel(channel) {
-            channel.onopen = () => { lastMoveSeq = 0; log('E2EE Data channel opened (' + channel.label + ')'); applyBitrate(); paintHostChips(); hostIceTries = 0; };
+        function setupDataChannel(channel, peer) {
+            channel.onopen = () => { peer ? (peer.moveSeq = 0, peer.iceTries = 0) : (lastMoveSeq = 0, hostIceTries = 0); log('E2EE Data channel opened (' + channel.label + ')' + (peer ? ' ' + peer.id.slice(0, 6) : '')); applyBitrate(); paintHostChips(); };
             channel.onmessage = async (e) => {
                 inCount[channel.label] !== undefined && inCount[channel.label]++;
                 if (typeof e.data !== 'string') return;
-                try { applyViewerMsg(JSON.parse(e.data)); } catch (err) {}
+                try { applyViewerMsg(JSON.parse(e.data), peer); } catch (err) {}
             };
         }
 
         let lastClipboard = '';
         setInterval(async () => {
-            if (isHost && dataChannel?.readyState === 'open') {
+            const outs = isHost ? peerList().map(p => p.clip).filter(ch => ch && ch.readyState === 'open') : [];
+            if (outs.length) {
                 const text = await window.electronAPI.readClipboard();
-                if (text && text !== lastClipboard) { lastClipboard = text; dataChannel.send(JSON.stringify({ type: 'clipboard-sync', text })); }
+                if (text && text !== lastClipboard) { lastClipboard = text; outs.forEach(ch => { try { ch.send(JSON.stringify({ type: 'clipboard-sync', text })); } catch (_) {} }); }
             }
         }, 2000);
 
@@ -896,6 +963,9 @@
         if (savedRoom) document.getElementById('customRoomCode').value = savedRoom;
         let selectedSourceId = null;
         let sourcesLoadedOnce = false;
+        let portalCapture = false;   // Wayland: the desktop's own dialog picks the screen at Start
+        let hostStarting = false;
+        const LAST_DISPLAY_KEY = 'amni-last-display';
 
         function escHtml(s) {
             return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -905,8 +975,25 @@
         // so the picker below is purely a nicer way to set it.
         function selectSource(id) {
             selectedSourceId = id;
+            const picked = availableSources.find(s => s.id === id);
+            if (picked && picked.display_id) localStorage.setItem(LAST_DISPLAY_KEY, String(picked.display_id));
             document.getElementById('monitorSelect').value = id;
             document.querySelectorAll('#monitorGrid .mon-card').forEach(c => c.classList.toggle('sel', c.dataset.id === id));
+        }
+
+        // Last screen you shared, else the MAIN display, else the first one. Taking
+        // index 0 picked whichever monitor the OS happened to list first.
+        function defaultSourceId() {
+            const last = localStorage.getItem(LAST_DISPLAY_KEY);
+            const pick = (last && availableSources.find(s => String(s.display_id) === last))
+                || availableSources.find(s => s.primary) || availableSources[0];
+            return pick.id;
+        }
+
+        function renderPortalNote() {
+            document.getElementById('monitorGrid').innerHTML = '<div class="mon-empty">Your desktop will ask which screen to share when you start hosting.</div>';
+            const btn = document.getElementById('monRefresh');
+            if (btn) btn.style.display = 'none';
         }
 
         function renderMonitorGrid() {
@@ -915,7 +1002,7 @@
                 grid.innerHTML = '<div class="mon-empty">No screens detected. Click Refresh.</div>';
                 return;
             }
-            if (!availableSources.some(s => s.id === selectedSourceId)) selectedSourceId = availableSources[0].id;
+            if (!availableSources.some(s => s.id === selectedSourceId)) selectedSourceId = defaultSourceId();
             grid.innerHTML = availableSources.map(s => {
                 const dims = s.width && s.height ? s.width + '\u00d7' + s.height : '';
                 const shot = s.thumbnail ? '<img alt="" src="' + s.thumbnail + '">' : '<div class="mon-none">no preview</div>';
@@ -947,6 +1034,7 @@
         }
 
         async function loadSources(manual) {
+            if (portalCapture) return;
             const btn = document.getElementById('monRefresh');
             if (manual && btn) { btn.disabled = true; btn.textContent = '\u2026'; }
             try {
@@ -964,8 +1052,7 @@
                 }
                 if (!sourcesLoadedOnce) {
                     sourcesLoadedOnce = true;
-                    const autoCode = document.getElementById('customRoomCode').value.trim();
-                    if (autoCode && sources.length && !isHost) { setMode('host'); userClickedHost = false; createAndHost(); }
+                    if (sources.length) maybeAutoHost();
                 }
             } catch (e) {
                 log('Could not list screens: ' + (e && e.message ? e.message : e), 'error');
@@ -974,32 +1061,71 @@
             }
         }
 
-        loadSources(false);
+        // A saved room code starts hosting when the app launches. Not after "End
+        // session", though: that reloads the page, and hosting straight back up
+        // left no moment to change the room code.
+        function maybeAutoHost() {
+            if (sessionStorage.getItem('amni-ended')) return;
+            const autoCode = document.getElementById('customRoomCode').value.trim();
+            if (autoCode && !isHost) { setMode('host'); userClickedHost = false; createAndHost(); }
+        }
+
+        (async () => {
+            try { portalCapture = !!(await window.electronAPI?.captureMode?.())?.portal; } catch (e) {}
+            if (portalCapture) { renderPortalNote(); maybeAutoHost(); }
+            else loadSources(false);
+        })();
         // Tick only while the picker is actually on screen and idle. Once hosting starts the host
         // panel is hidden, so this stops paying for captures nobody is looking at.
         setInterval(() => {
-            if (document.hidden || isHost || !document.hasFocus()) return;
+            if (portalCapture || hostStarting || document.hidden || isHost || !document.hasFocus()) return;
             if (document.getElementById('hostMode').style.display === 'none') return;
             loadSources(false);
         }, MON_REFRESH_MS);
 
         async function createAndHost() {
+            if (hostStarting || isHost) return;
+            hostStarting = true;
+            try {
+                await startHosting();
+            } catch (e) {
+                localStream?.getTracks().forEach(t => { t.onended = null; t.stop(); });
+                localStream = null;
+                if (hwPath) window.electronAPI?.stopHwCapture?.();
+                log('Could not start sharing: ' + (e && e.message ? e.message : e), 'error');
+            } finally {
+                hostStarting = false;
+            }
+        }
+
+        async function startHosting() {
+            if (portalCapture) {
+                // The desktop's share dialog opens here, in answer to the click.
+                availableSources = await window.electronAPI.getSources();
+                if (!availableSources.length) { log('Screen sharing was cancelled or refused by the desktop', 'error'); return; }
+                const select = document.getElementById('monitorSelect');
+                select.innerHTML = '';
+                availableSources.forEach(s => { const o = document.createElement('option'); o.value = s.id; o.textContent = s.name; select.appendChild(o); });
+                select.value = availableSources[0].id;
+            }
+            if (!availableSources.length) { log('No screens to share. Click Refresh.', 'error'); return; }
             initSocket();
             const customCode = document.getElementById('customRoomCode').value.trim().toUpperCase();
             if (customCode) localStorage.setItem('amni-custom-code', customCode);
             const sourceId = document.getElementById('monitorSelect').value;
-            const src = availableSources.find(s => s.id === sourceId) || availableSources[0];
-            const res = getResolution();
+            const src = availableSources.find(s => s.id === sourceId) || availableSources.find(s => s.id === defaultSourceId());
+            if (src.display_id) localStorage.setItem(LAST_DISPLAY_KEY, String(src.display_id));
             const fps = parseInt(document.getElementById('fpsSelect').value);
             const audioOn = document.getElementById('audioToggle').checked;
-            const videoConstraints = { chromeMediaSource: 'desktop', chromeMediaSourceId: src.id, frameRate: { ideal: fps } };
-            if (res) { videoConstraints.maxWidth = res.width; videoConstraints.maxHeight = res.height; }
-            const monIdx = Math.max(0, availableSources.findIndex(s => s.id === sourceId));
+            const box = hwFrameSize();
+            const videoConstraints = { chromeMediaSource: 'desktop', chromeMediaSourceId: src.id, maxFrameRate: fps, maxWidth: box.width, maxHeight: box.height };
+            const monIdx = Math.max(0, availableSources.findIndex(s => s.id === src.id));
             const kbps = parseInt(document.getElementById('qualitySlider').value) || WAN_DEFAULT_KBPS;
             hwPath = false;
             if (window.electronAPI?.startHwCapture) {
                 try {
-                    const hw = await window.electronAPI.startHwCapture({ fps, kbps, output: monIdx });
+                    hwOpts = { fps, kbps, output: monIdx, width: box.width, height: box.height };
+                    const hw = await window.electronAPI.startHwCapture(hwOpts);
                     if (hw && hw.ok) {
                         hwPath = true;
                         log(`HW capture ${hw.encoder || 'h264'} ${hw.width || ''}×${hw.height || ''} @ ${fps}fps`, 'success');
@@ -1009,23 +1135,13 @@
                 } catch (e) { log('HW capture failed — Chromium desktop capture'); }
             }
             try {
-                if (hwPath) {
-                    if (audioOn) {
-                        try { localStream = await navigator.mediaDevices.getUserMedia({ audio: { mandatory: { chromeMediaSource: 'desktop' } }, video: false }); }
-                        catch (e) { localStream = null; log('Desktop audio unavailable', 'error'); }
-                    }
-                } else {
-                    localStream = await navigator.mediaDevices.getUserMedia({ audio: audioOn ? { mandatory: { chromeMediaSource: 'desktop' } } : false, video: { mandatory: videoConstraints } });
-                }
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: audioOn ? { mandatory: { chromeMediaSource: 'desktop' } } : false, video: { mandatory: videoConstraints } });
             } catch (err) {
-                if (hwPath) { localStream = null; }
-                else {
-                    log('Falling back to video-only capture', 'error');
-                    localStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: videoConstraints } });
-                }
+                log('Falling back to video-only capture', 'error');
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: videoConstraints } });
             }
             if (localStream) localStream.getVideoTracks().forEach(tuneVideoTrack);
-            localStream?.getTracks().forEach(t => t.onended = () => endSession(true));
+            localStream?.getTracks().forEach(t => t.onended = () => hwPath && t.kind === 'audio' ? log('Desktop audio ended', 'error') : endSession(true));
             isHost = true;
             socket.emit('create-room', customCode);
             socket.once('room-created', async (id) => {
@@ -1206,7 +1322,12 @@
         function endSession(force) {
             window.electronAPI?.setTrayHost?.(false);
             window.electronAPI?.showWindow?.();
-            if (force || confirm('End this session?')) { statsLoop && clearInterval(statsLoop); location.reload(); }
+            if (force || confirm('End this session?')) {
+                statsLoop && clearInterval(statsLoop);
+                if (isHost && hwPath) window.electronAPI?.stopHwCapture?.();
+                sessionStorage.setItem('amni-ended', '1');
+                location.reload();
+            }
         }
 
         const overlay = document.getElementById('inputOverlay');
@@ -1257,6 +1378,18 @@
             if (msg.kind === 1) { hwPath = true; window.electronAPI?.ackHwFrame?.(); return; }
             if (msg.kind !== 2) { window.electronAPI?.ackHwFrame?.(); return; }
             sendScreenAu(hwPayloadBytes(msg.payload), !!(msg.flags & 1));
+        });
+        window.electronAPI?.onHwDead?.(async (info) => {
+            if (!isHost || !hwPath || !hwOpts || hwReviving) return;
+            hwReviving = true;
+            log('HW capture stopped' + (info?.reason ? ' (' + info.reason + ')' : '') + ' - re-arming', 'error');
+            for (let tries = 0; tries < 3 && isHost && hwPath; tries++) {
+                await new Promise(r => setTimeout(r, 1200));
+                const hw = await window.electronAPI.startHwCapture(hwOpts).catch(() => null);
+                if (hw && hw.ok) { hwReviving = false; return log(`HW capture back on ${hw.encoder || 'h264'} ${hw.width || ''}x${hw.height || ''}`, 'success'); }
+            }
+            hwReviving = false;
+            log('HW capture did not come back - the screen is on the slow path until you restart the session', 'error');
         });
         window.addEventListener('beforeunload', () => { try { window.electronAPI?.stopHwCapture?.(); } catch (e) {} });
         document.getElementById('autoHint').classList.toggle('on', document.getElementById('autoBitrateToggle').checked);
