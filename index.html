@@ -421,7 +421,7 @@
         }
         function tuneVideoTrack(track) {
             if (!track) return;
-            try { track.contentHint = 'motion'; } catch (e) {}
+            try { track.contentHint = 'detail'; } catch (e) {}
         }
         async function captureDesktopAudioOnly(sourceId) {
             const video = { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sourceId, maxWidth: 2, maxHeight: 2, maxFrameRate: 1 } };
@@ -477,7 +477,7 @@
             hwStash = hwStash.slice(0, keyEnd).concat(tail);
         }
         function hwFrameSize() {
-            return getResolution() || fitCaptureRes({ width: 1920, height: 1080 }) || { width: 1920, height: 1080 };
+            return getResolution() || selectedSourceSize() || { width: 7680, height: 4320 };
         }
         const screenOuts = () => isHost ? peerList().filter(p => p.hw && p.screen && p.screen.readyState === 'open').map(p => p.screen) : (screenChannel && screenChannel.readyState === 'open' ? [screenChannel] : []);
         function sendScreenAu(au, key) {
@@ -491,7 +491,7 @@
                     return;
                 }
                 outs.forEach(ch => {
-                    if (!key && ch.bufferedAmount > 100000) return;
+                    if (!key && ch.bufferedAmount > 256000) return;
                     parts.forEach(p => { try { ch.send(p); } catch (e) { const m = String((e && e.message) || e); if (m !== screenSendErr) { screenSendErr = m; window.electronAPI?.logLine?.('screen send failed: ' + m); } } });
                 });
             } finally {
@@ -571,7 +571,7 @@
             if (lossBad || rttBad || bwLim) next = Math.max(4000, Math.round(cur * 0.82));
             else if (lossOk && rttOk && !cpuLim) next = Math.min(20000, cur + 500);
             if (AB.lan) next = Math.max(next, LAN_FLOOR_KBPS);
-            if (AB.lastAvail > 0 && !AB.lan) next = Math.min(next, Math.max(500, Math.round(AB.lastAvail / 1000 * 0.92)));
+            if (AB.lastAvail > 0 && !AB.lan && (lossBad || rttBad || bwLim)) next = Math.min(next, Math.max(4000, Math.round(AB.lastAvail / 1000 * 0.92)));
             next = Math.round(next / 500) * 500;
             if (Math.abs(next - cur) >= 500) { slider.value = next; updateQualityLabel(); applyBitrate(); }
             applyLanProfile();
@@ -605,11 +605,11 @@
             const box = hwFrameSize();
             const fps = parseInt(document.getElementById('fpsSelect').value);
             const audioOn = document.getElementById('audioToggle').checked;
-            const constraints = { frameRate: { ideal: fps, max: fps }, width: { max: box.width }, height: { max: box.height } };
+            const constraints = document.getElementById('resolutionSelect').value === 'source' ? { frameRate: { ideal: fps, max: fps } } : { frameRate: { ideal: fps, max: fps }, width: { max: box.width }, height: { max: box.height } };
             const vt = localStream.getVideoTracks()[0];
             if (vt) {
                 tuneVideoTrack(vt);
-                try { await vt.applyConstraints(constraints); log(`Stream: ${box.width}×${box.height} @ ${fps}fps`); } catch(e) { log('Constraint apply failed: ' + e.message, 'error'); }
+                try { await vt.applyConstraints(constraints); (st => log(`Stream: ${st.width || box.width}×${st.height || box.height} @ ${fps}fps`))(vt.getSettings ? vt.getSettings() : {}); } catch(e) { log('Constraint apply failed: ' + e.message, 'error'); }
             }
             localStream.getAudioTracks().forEach(t => { t.enabled = audioOn; });
             applyBitrate();
@@ -617,8 +617,8 @@
 
         function lockEncodeParams(params, kbps) {
             if (!params.encodings || !params.encodings.length) params.encodings = [{}];
-            params.degradationPreference = 'maintain-framerate';
-            params.encodings[0].degradationPreference = 'maintain-framerate';
+            params.degradationPreference = 'maintain-resolution';
+            params.encodings[0].degradationPreference = 'maintain-resolution';
             params.encodings[0].scaleResolutionDownBy = 1;
             if (kbps > 0) {
                 params.encodings[0].maxBitrate = kbps * 1000;
@@ -896,7 +896,7 @@
             setupDataChannel(peer.move, peer);
             peer.clip = peer.pc.createDataChannel('clipboard', { ordered: true });
             setupDataChannel(peer.clip, peer);
-            setupScreenChannel(peer.pc.createDataChannel('screen', { ordered: true }), peer);
+            setupScreenChannel(peer.pc.createDataChannel('screen', { ordered: true, priority: 'low' }), peer);
             if (localStream) localStream.getTracks().forEach(t => peer.pc.addTrack(t, localStream));
             preferDesktopCodecs(peer.pc);
             applyBitrate();

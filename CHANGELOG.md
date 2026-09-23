@@ -8,6 +8,10 @@
 - `?transport=socket` forces socket mode, for networks where WebRTC is blocked.
 - The server relays `sv` host → addressed viewer only, and viewer → host only for `want/ack/key/stop` from a joined viewer. The socket.io message cap is 4 MB so keyframes fit.
 
+### Fixed
+- **The picture was grainy over the internet.** Three causes, all on the host. (1) Auto-bitrate capped its target at WebRTC's `availableOutgoingBitrate`, but that estimate never probes above the cap it is given, so one dip ratcheted the slider down to 500 kbps and it stayed there; it now only follows the estimate when there is loss, high RTT or a bandwidth limit, and never below 4 Mbps off the LAN. (2) "Source (native)" still fitted the capture into a 1920×1080 box, and on Wayland the portal reports no screen size, so a 3440×1440 screen went out as 1920×804; native now means no size cap. (3) The track was tuned `contentHint 'motion'` with `maintain-framerate`, which sheds detail first; it is `'detail'` with `maintain-resolution` again, so text stays sharp and a tight link drops frames instead. `tests/test_stream_quality.js` passes in full again.
+- The screen channel for hardware frames is low priority with a 256 KB backlog limit, so it cannot starve the input channels.
+
 ### Tests
 - `tests/test_socket_stream.js` (14 checks): wiring, plus a live relay run showing a viewer can't push frames, a non-member is ignored, and a 1.5 MB keyframe reaches only the addressed viewer. It streams live in Amni-Browse (WebKitGTK) and Chrome against a throwaway server.
 
