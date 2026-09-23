@@ -1,5 +1,11 @@
 # Amni-Connect Changelog
 
+## v1.6.19 - the public link opens the viewer, and no stray menu bar (2026-09-23)
+
+### Fixed
+- **https://connect.amni-scient.com/ said "Cannot GET /".** The viewer was only served at `/viewer`. `/` now serves the same page, so the bare link works.
+- **Electron's default File/Edit/View menu bar showed under the Amni title bar.** It is hidden (Alt still shows it).
+
 ## v1.6.18 - Amni-Scient look for the host window and the phone viewer (2026-09-22)
 
 ### Changed

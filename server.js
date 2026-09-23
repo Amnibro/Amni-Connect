@@ -44,7 +44,7 @@ app.get('/socket.io-client/:file', (req, res) => {
     res.type(file.endsWith('.map') ? 'application/json' : 'application/javascript').send(asset(path.join(SIO_DIR, file)));
   } catch (_) { res.status(404).end(); }
 });
-app.get('/viewer', (_, res) => {
+app.get(['/', '/viewer'], (_, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.set('CDN-Cache-Control', 'no-store');
   res.set('Cloudflare-CDN-Cache-Control', 'no-store');
