@@ -49,5 +49,4 @@ __pycache__/
 *.pyc
 
 # Local secrets / inbox
-auth-secret
 received-files/
