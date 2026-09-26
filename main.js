@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, clipboard, Tray, Menu, nativeImage, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, clipboard, Tray, Menu, nativeImage, screen, systemPreferences } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -465,6 +465,7 @@ function startAutoUpdate() {
 
 app.whenReady().then(() => {
   ensureTray('Amni-Connect');
+  process.platform === 'darwin' && hostLog('macOS access screen=' + systemPreferences.getMediaAccessStatus('screen') + ' accessibility=' + systemPreferences.isTrustedAccessibilityClient(false));
   ensureElevatedTask();
   spawnRust();
   createWindow();
