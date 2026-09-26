@@ -279,7 +279,7 @@ io.on('connection', (socket) => {
     // because video rides WebRTC peer-to-peer and keeps flowing after signaling dies.
     if (!room) return socket.emit('input-dropped', { roomId: data.roomId, reason: 'no-room' });
     if (!room.viewers.has(socket)) return socket.emit('input-dropped', { roomId: data.roomId, reason: 'not-joined' });
-    if (relayedInput) relayedInput(data);
+    if (relayedInput && !cloud) relayedInput(data);
     if (room.host && room.host.connected) room.host.emit('input-event', data);
   });
 
