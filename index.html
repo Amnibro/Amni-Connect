@@ -1144,6 +1144,7 @@
             if (manual && btn) { btn.disabled = true; btn.textContent = '\u2026'; }
             try {
                 const sources = await window.electronAPI.getSources();
+                sourcesLoadedOnce || sources.length || window._noScreens || (window._noScreens = true, window.electronAPI?.logLine?.('no screens visible to capture yet, retrying'));
                 const prev = availableSources;
                 availableSources = sources;
                 if (sameScreenSet(prev, sources) && document.querySelector('#monitorGrid .mon-card')) {
@@ -1170,8 +1171,9 @@
         // session", though: that reloads the page, and hosting straight back up
         // left no moment to change the room code.
         function maybeAutoHost() {
-            if (sessionStorage.getItem('amni-ended')) return;
-            const autoCode = document.getElementById('customRoomCode').value.trim();
+            const autoCode = document.getElementById('customRoomCode').value.trim(), ended = sessionStorage.getItem('amni-ended');
+            window.electronAPI?.logLine?.('auto-host ' + (ended ? 'skipped: session was ended' : !autoCode ? 'skipped: no room code' : isHost ? 'skipped: already hosting' : 'starting ' + availableSources.length + ' screen(s)'));
+            if (ended) return;
             if (autoCode && !isHost) { setMode('host'); userClickedHost = false; createAndHost(); }
         }
 
@@ -1189,8 +1191,8 @@
         // Tick only while the picker is actually on screen and idle. Once hosting starts the host
         // panel is hidden, so this stops paying for captures nobody is looking at.
         setInterval(() => {
-            if (portalCapture || hostStarting || document.hidden || isHost || !document.hasFocus()) return;
-            if (document.getElementById('hostMode').style.display === 'none') return;
+            if (portalCapture || hostStarting || isHost) return;
+            if (!(CLOUD && !sourcesLoadedOnce) && (document.hidden || !document.hasFocus() || document.getElementById('hostMode').style.display === 'none')) return;
             loadSources(false);
         }, MON_REFRESH_MS);
 

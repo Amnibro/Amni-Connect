@@ -34,6 +34,7 @@ const auth = require('./auth').createAuth(DATA_ROOT);
 const CLOUD = process.env.AMNI_CLOUD === '1';
 const cloud = CLOUD ? require('./cloud').createCloud(DATA_ROOT, fs.readFileSync(path.join(DATA_ROOT, 'auth-secret'), 'utf8').trim()) : null;
 app.use(express.json({ limit: '64kb' }));
+cloud && app.use((req, res, next) => cloud.ipOk(req.headers, req.socket.remoteAddress) || devHeader(req.headers) || /^\/api\/devices\/pair\/(start|poll)$/.test(req.path) ? next() : (console.log(`[cloud] denied ${req.headers['cf-connecting-ip'] || req.socket.remoteAddress} ${req.method} ${req.path} ${String(req.headers['user-agent'] || '').slice(0, 80)}`), res.status(403).type('text').send('Forbidden')));
 cloud ? (cloud.routes(app), app.get(['/auth/status', '/auth/me'], (req, res) => res.json({ enabled: false, cloud: true, authed: !!cloud.userOf(req.headers) }))) : auth.routes(app);
 const devHeader = (h) => { const [deviceId, secret] = String((h && h['x-amni-device']) || '').split(':'); return cloud && deviceId ? cloud.deviceAuth({ deviceId, secret }) : null; };
 const allowedReq = (h) => cloud ? !!(cloud.userOf(h) || devHeader(h)) : auth.allowed(h);
@@ -187,6 +188,7 @@ if (cloud) cloud.setKick((deviceId, userId) => {
   for (const v of [...room.viewers]) if (!userId || (v.data.user && v.data.user.id === userId)) { try { v.emit('kicked', { roomId: deviceId }); } catch (_) {} setTimeout(() => { try { v.disconnect(true); } catch (_) {} }, 30); }
   if (!userId && room.host) { try { room.host.emit('device-removed'); room.host.disconnect(true); } catch (_) {} rooms.delete(deviceId); }
 });
+cloud && io.use((socket, next) => cloud.deviceAuth(socket.handshake.auth) || cloud.ipOk(socket.handshake.headers, socket.handshake.address) ? next() : (console.log(`[cloud] denied socket ${socket.handshake.headers['cf-connecting-ip'] || socket.handshake.address}`), next(new Error('forbidden'))));
 io.on('connection', (socket) => {
   const mine = lanIp(sockIp(socket));
   if (mine) socket.emit('your-lan', mine);

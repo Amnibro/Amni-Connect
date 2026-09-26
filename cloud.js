@@ -12,6 +12,13 @@ function createCloud(dataRoot, secret) {
   const db = (() => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (_) { return {}; } })();
   for (const k of ['users', 'devices', 'invites', 'pairs']) db[k] = db[k] || {};
   db.grants = db.grants || [];
+  const cfgFile = path.join(dataRoot, 'cloud-config.json');
+  let cfgCache = null, cfgAt = 0;
+  const conf = () => now() - cfgAt < 5000 && cfgCache ? cfgCache : (cfgAt = now(), cfgCache = (() => { try { return JSON.parse(fs.readFileSync(cfgFile, 'utf8')); } catch (_) { return {}; } })());
+  const v4 = (s) => s.split('.').reduce((a, x) => a * 256 + +x, 0);
+  const inCidr = (ip, c) => { const [b, m] = String(c).split('/'); return m === undefined ? ip === b : /^\d+\.\d+\.\d+\.\d+$/.test(ip) && Math.floor(v4(ip) / 2 ** (32 - +m)) === Math.floor(v4(b) / 2 ** (32 - +m)); };
+  const peerIp = (h, addr) => { const a = String(addr || '').replace(/^::ffff:/, ''), cf = h && h['cf-connecting-ip']; return (a === '127.0.0.1' || a === '::1') && cf ? String(cf).replace(/^::ffff:/, '') : a; };
+  const ipOk = (h, addr) => { const allow = conf().allow, p = peerIp(h, addr); return !Array.isArray(allow) || !allow.length || ((p === '127.0.0.1' || p === '::1') && !(h && h['cf-connecting-ip'])) || allow.some((c) => inCidr(p, c)); };
   let timer = null;
   const save = () => { clearTimeout(timer); timer = setTimeout(() => { const t = file + '.tmp'; fs.writeFileSync(t, JSON.stringify(db)); fs.renameSync(t, file); }, 80); };
   const online = new Map();
@@ -25,14 +32,14 @@ function createCloud(dataRoot, secret) {
     if (!body || !sig || sign(body) !== sig) return null;
     let p; try { p = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')); } catch (_) { return null; }
     const u = p && p.exp > now() / 1000 && db.users[p.u];
-    return u && (u.v || 0) === (p.v || 0) ? { id: p.u, ...u } : null;
+    return u && (u.v || 0) === (p.v || 0) && (u.via !== 'passcode' || (conf().passcode && u.pc === sha(conf().passcode.hash))) ? { id: p.u, ...u } : null;
   };
   const secure = (req) => !!(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-proto'] === 'https');
   const issue = (req, res, uid) => { const body = Buffer.from(JSON.stringify({ u: uid, v: db.users[uid].v || 0, exp: Math.floor(now() / 1000) + SESSION_S })).toString('base64url'); res.setHeader('Set-Cookie', `${COOKIE}=${body}.${sign(body)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_S}${secure(req) ? '; Secure' : ''}`); };
-  const ip = (req) => String(req.headers['cf-connecting-ip'] || req.socket?.remoteAddress || '');
+  const ip = (req) => peerIp(req.headers, req.socket?.remoteAddress);
   const limited = (key) => { const f = fails.get(key); return f && now() - f.t < 15 * 60 * 1000 && f.n >= 10; };
   const failed = (key) => { const f = fails.get(key) && now() - fails.get(key).t < 15 * 60 * 1000 ? fails.get(key) : { n: 0, t: now() }; f.n++; fails.set(key, f); };
-  const role = (uid, did) => { const d = db.devices[did]; if (!d || !uid) return null; if (d.owner === uid) return 'owner'; const g = db.grants.find((x) => x.device === did && x.user === uid && (!x.exp || x.exp > now())); return g ? g.role : null; };
+  const role = (uid, did) => { const d = db.devices[did]; if (!d || !uid) return null; if (d.owner === uid) return 'owner'; const pc = db.users[uid]?.via === 'passcode' && conf().passcode; if (pc) return db.users[d.owner]?.login === pc.owner ? pc.role || 'control' : null; const g = db.grants.find((x) => x.device === did && x.user === uid && (!x.exp || x.exp > now())); return g ? g.role : null; };
   const deviceView = (did, uid) => { const d = db.devices[did]; return { id: did, name: d.name, platform: d.platform, online: online.has(did), lastSeen: online.has(did) ? now() : d.lastSeen || null, role: role(uid, did), owner: db.users[d.owner]?.name || '' }; };
   const need = (req, res) => { const u = userOf(req.headers); if (!u) { res.status(401).json({ error: 'sign in' }); return null; } return u; };
   const owned = (req, res) => { const u = need(req, res); if (!u) return null; const d = db.devices[req.params.id]; if (!d || d.owner !== u.id) { res.status(404).json({ error: 'not your device' }); return null; } return { u, d }; };
@@ -56,8 +63,18 @@ function createCloud(dataRoot, secret) {
     });
     app.post('/api/logout', (req, res) => { res.setHeader('Set-Cookie', `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`); res.json({ ok: true }); });
     app.post('/api/password', (req, res) => { const u = need(req, res); if (!u) return; if (!checkPw(req.body?.current, u.pw)) return res.status(401).json({ error: 'Current password is wrong' }); if (String(req.body?.password || '').length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' }); const x = db.users[u.id]; x.pw = hashPw(req.body.password); x.v = (x.v || 0) + 1; save(); issue(req, res, u.id); res.json({ ok: true }); });
-    app.get('/api/me', (req, res) => { const u = userOf(req.headers); res.json(u ? { user: { id: u.id, login: u.login, name: u.name } } : { user: null }); });
-    app.get('/api/devices', (req, res) => { const u = need(req, res); if (!u) return; sweep(); const ids = new Set([...Object.keys(db.devices).filter((d) => db.devices[d].owner === u.id), ...db.grants.filter((g) => g.user === u.id).map((g) => g.device)]); res.json({ devices: [...ids].filter((d) => db.devices[d]).map((d) => deviceView(d, u.id)).sort((a, b) => (b.role === 'owner') - (a.role === 'owner') || b.online - a.online || a.name.localeCompare(b.name)) }); });
+    app.get('/api/me', (req, res) => { const u = userOf(req.headers); res.json({ user: u ? { id: u.id, login: u.login, name: u.name, via: u.via || 'account' } : null, passcode: !!conf().passcode }); });
+    app.post('/api/passcode', (req, res) => {
+      const pc = conf().passcode, key = 'pw:' + ip(req);
+      if (!pc) return res.status(404).json({ error: 'Passcode entry is off' });
+      if (limited(key)) return res.status(429).json({ error: 'Too many attempts, try again in 15 minutes' });
+      if (!checkPw(String(req.body?.code || '').trim(), pc.hash)) { failed(key); return res.status(401).json({ error: 'Wrong passcode' }); }
+      fails.delete(key);
+      const name = clean(req.body?.name, 32) || 'Guest', login = 'passcode:' + name.toLowerCase(), hit = Object.entries(db.users).find(([, x]) => x.login === login);
+      const id = hit ? hit[0] : rid(9); db.users[id] = { ...(db.users[id] || { login, name, via: 'passcode', created: now(), v: 0 }), pc: sha(pc.hash) }; save();
+      issue(req, res, id); res.json({ ok: true, user: { id, login, name, via: 'passcode' } });
+    });
+    app.get('/api/devices', (req, res) => { const u = need(req, res); if (!u) return; sweep(); const ids = new Set([...Object.keys(db.devices).filter((d) => db.devices[d].owner === u.id || (u.via === 'passcode' && role(u.id, d))), ...db.grants.filter((g) => g.user === u.id).map((g) => g.device)]); res.json({ devices: [...ids].filter((d) => db.devices[d]).map((d) => deviceView(d, u.id)).sort((a, b) => (b.role === 'owner') - (a.role === 'owner') || b.online - a.online || a.name.localeCompare(b.name)) }); });
     app.post('/api/devices/pair/start', (req, res) => {
       if (limited('ps:' + ip(req))) return res.status(429).json({ error: 'Too many pairing requests' });
       failed('ps:' + ip(req)); sweep();
@@ -105,6 +122,6 @@ function createCloud(dataRoot, secret) {
   const deviceAuth = (auth) => { const id = String(auth?.deviceId || ''), d = db.devices[id]; return d && auth?.secret && sha(auth.secret) === d.secret ? id : null; };
   const markOnline = (id, sock) => { online.set(id, sock); const d = db.devices[id]; if (d) { d.lastSeen = now(); save(); } };
   const markOffline = (id, sock) => { if (online.get(id) === sock) { online.delete(id); const d = db.devices[id]; if (d) { d.lastSeen = now(); save(); } } };
-  return { routes, userOf, role, deviceAuth, markOnline, markOffline, setKick, db };
+  return { routes, userOf, role, ipOk, hashPw, deviceAuth, markOnline, markOffline, setKick, db };
 }
 module.exports = { createCloud };
