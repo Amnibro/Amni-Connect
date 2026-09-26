@@ -277,6 +277,8 @@
     <script src="node_modules/socket.io-client/dist/socket.io.min.js"></script>
     <script>
         const SIGNALING_URL = 'http://localhost:3389';
+        const NO_DESKTOP_AUDIO = /Mac/i.test(navigator.platform);
+        if (NO_DESKTOP_AUDIO) { const at = document.getElementById('audioToggle'); if (at) { at.checked = false; at.disabled = true; at.closest('.toggle-row').title = 'Desktop audio is off on macOS: ScreenCaptureKit loopback crashes this Electron build'; } }
         let ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
         let iceHasTurn = false;
         async function loadIce() {
@@ -424,6 +426,7 @@
             try { track.contentHint = 'detail'; } catch (e) {}
         }
         async function captureDesktopAudioOnly(sourceId) {
+            if (NO_DESKTOP_AUDIO) throw new Error('desktop audio is off on macOS');
             const video = { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sourceId, maxWidth: 2, maxHeight: 2, maxFrameRate: 1 } };
             const stream = await navigator.mediaDevices.getUserMedia({ audio: { mandatory: { chromeMediaSource: 'desktop' } }, video });
             stream.getVideoTracks().forEach(t => { try { t.stop(); } catch (e) {} stream.removeTrack(t); });
@@ -1105,9 +1108,9 @@
                     renderMonitorGrid();
                     if (manual) log('Found ' + sources.length + ' screen' + (sources.length === 1 ? '' : 's'), 'success');
                 }
-                if (!sourcesLoadedOnce) {
+                if (!sourcesLoadedOnce && sources.length) {
                     sourcesLoadedOnce = true;
-                    if (sources.length) maybeAutoHost();
+                    maybeAutoHost();
                 }
             } catch (e) {
                 log('Could not list screens: ' + (e && e.message ? e.message : e), 'error');
@@ -1126,7 +1129,12 @@
         }
 
         (async () => {
-            try { portalCapture = !!(await window.electronAPI?.captureMode?.())?.portal; } catch (e) {}
+            try {
+                const mode = await window.electronAPI?.captureMode?.();
+                portalCapture = !!mode?.portal;
+                const codeEl = document.getElementById('customRoomCode');
+                if (mode?.room && !codeEl.value.trim()) codeEl.value = mode.room;
+            } catch (e) {}
             if (portalCapture) { renderPortalNote(); maybeAutoHost(); }
             else loadSources(false);
         })();
@@ -1171,7 +1179,7 @@
             const src = availableSources.find(s => s.id === sourceId) || availableSources.find(s => s.id === defaultSourceId());
             if (src.display_id) localStorage.setItem(LAST_DISPLAY_KEY, String(src.display_id));
             const fps = parseInt(document.getElementById('fpsSelect').value);
-            const audioOn = document.getElementById('audioToggle').checked;
+            const audioOn = document.getElementById('audioToggle').checked && !NO_DESKTOP_AUDIO;
             const box = hwFrameSize();
             const videoConstraints = { chromeMediaSource: 'desktop', chromeMediaSourceId: src.id, maxFrameRate: fps, maxWidth: box.width, maxHeight: box.height };
             const monIdx = Math.max(0, availableSources.findIndex(s => s.id === src.id));

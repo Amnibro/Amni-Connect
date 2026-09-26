@@ -10,6 +10,7 @@ const GPU_CACHE_DIR = path.join(USER_DATA, 'GPUCache');
 try { fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch (_) {}
 try { fs.mkdirSync(GPU_CACHE_DIR, { recursive: true }); } catch (_) {}
 app.setPath('userData', USER_DATA);
+process.platform === 'darwin' && !process.env.APPDATA && (process.env.APPDATA = app.getPath('appData'));
 app.setPath('cache', CACHE_DIR);
 app.commandLine.appendSwitch('disk-cache-dir', CACHE_DIR);
 app.commandLine.appendSwitch('gpu-disk-cache-dir', GPU_CACHE_DIR);
@@ -82,7 +83,7 @@ process.on('uncaughtException', (e) => hostLog('uncaughtException ' + ((e && e.s
 
 function trayIcon() {
   const p = path.join(__dirname, 'assets', 'icon.png');
-  try { if (fs.existsSync(p)) return nativeImage.createFromPath(p); } catch (_) {}
+  try { if (fs.existsSync(p)) return process.platform === 'darwin' ? nativeImage.createFromPath(p).resize({ height: 18 }) : nativeImage.createFromPath(p); } catch (_) {}
   return nativeImage.createEmpty();
 }
 function rebuildTrayMenu(label) {
@@ -514,7 +515,7 @@ const THUMB_SIZE = { width: 480, height: 270 };
 // hosting starts, and lets the desktop dialog do the picking.
 const PORTAL_CAPTURE = process.platform === 'linux'
   && (process.env.XDG_SESSION_TYPE === 'wayland' || !!process.env.WAYLAND_DISPLAY);
-ipcMain.handle('capture-mode', () => ({ portal: PORTAL_CAPTURE }));
+ipcMain.handle('capture-mode', () => ({ portal: PORTAL_CAPTURE, room: String(process.env.AMNI_CONNECT_ROOM || '').trim().toUpperCase() }));
 
 // One capturer call at a time: overlapping portal sessions are what KDE refused.
 let sourcesInFlight = null;
