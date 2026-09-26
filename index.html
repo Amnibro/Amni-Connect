@@ -149,6 +149,15 @@
                     <button class="seg-btn" data-mode="join" onclick="setMode('join')">&#128279; Join</button>
                 </div>
                 <div id="hostMode">
+                    <div class="pair-addr" id="cloudPanel">
+                        <label>Account</label>
+                        <div class="pair-hint" id="cloudHint">Link this computer to reach it from any browser, walled off behind your account.</div>
+                        <div class="pair-row">
+                            <input type="text" id="cloudServer" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="https://connect.amni-scient.com">
+                            <button type="button" class="info" id="cloudBtn" onclick="cloudLink()">Link</button>
+                        </div>
+                        <div class="room-code" id="cloudCode" style="display:none"></div>
+                    </div>
                     <input type="text" id="customRoomCode" placeholder="Optional: Persistent Room Code" style="text-transform:uppercase">
                     <select id="monitorSelect" style="display:none"></select>
                     <div class="mon-head"><span>Screen to share</span><button type="button" class="mon-refresh" id="monRefresh" onclick="loadSources(true)">&#8635; Refresh</button></div>
@@ -277,14 +286,47 @@
     <script src="node_modules/socket.io-client/dist/socket.io.min.js"></script>
     <script>
         const SIGNALING_URL = 'http://localhost:3389';
+        let CLOUD = null, cloudPollT = null;
+        const viewerRole = new Map();
+        async function paintCloud() {
+            const c = await window.electronAPI?.cloudGet?.(), hint = document.getElementById('cloudHint'), btn = document.getElementById('cloudBtn'), srv = document.getElementById('cloudServer'), codeEl = document.getElementById('customRoomCode');
+            if (!c) return;
+            CLOUD = c.linked ? c : null;
+            srv.value = c.server;
+            srv.disabled = !!CLOUD;
+            btn.textContent = CLOUD ? 'Unlink' : 'Link';
+            btn.onclick = CLOUD ? cloudUnlink : cloudLink;
+            hint.textContent = CLOUD ? `Linked as ${c.name}. Open ${c.server.replace(/^https?:\/\//, '')} to connect or share.` : 'Link this computer to reach it from any browser, walled off behind your account.';
+            codeEl.style.display = CLOUD ? 'none' : '';
+            CLOUD && (codeEl.value = c.deviceId);
+        }
+        async function cloudLink() {
+            const box = document.getElementById('cloudCode'), hint = document.getElementById('cloudHint'), srv = document.getElementById('cloudServer').value.trim();
+            try {
+                const r = await window.electronAPI.cloudPairStart(srv);
+                box.textContent = r.code; box.style.display = '';
+                hint.textContent = `Sign in at ${(srv || 'connect.amni-scient.com').replace(/^https?:\/\//, '')}, choose Add a computer and enter this code.`;
+                clearInterval(cloudPollT);
+                cloudPollT = setInterval(async () => {
+                    const p = await window.electronAPI.cloudPairPoll().catch(() => ({ status: 'pending' }));
+                    if (p.status === 'pending') return;
+                    clearInterval(cloudPollT); box.style.display = 'none';
+                    p.status === 'paired' ? (log('Linked to account as ' + p.name, 'success'), sessionStorage.removeItem('amni-ended'), location.reload()) : (hint.textContent = 'Code expired. Click Link to get a new one.');
+                }, 2000);
+            } catch (e) { hint.textContent = 'Could not reach the account server: ' + (e.message || e); }
+        }
+        async function cloudUnlink() {
+            if (!confirm('Unlink this computer? It will no longer be reachable from your account.')) return;
+            await window.electronAPI.cloudUnlink();
+            location.reload();
+        }
         const NO_DESKTOP_AUDIO = /Mac/i.test(navigator.platform);
         if (NO_DESKTOP_AUDIO) { const at = document.getElementById('audioToggle'); if (at) { at.checked = false; at.disabled = true; at.closest('.toggle-row').title = 'Desktop audio is off on macOS: ScreenCaptureKit loopback crashes this Electron build'; } }
         let ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
         let iceHasTurn = false;
         async function loadIce() {
             try {
-                const r = await fetch(SIGNALING_URL + '/ice-servers', { cache: 'no-store' });
-                const j = await r.json();
+                const j = CLOUD ? await window.electronAPI.cloudIce() : await (await fetch(SIGNALING_URL + '/ice-servers', { cache: 'no-store' })).json();
                 if (Array.isArray(j.iceServers) && j.iceServers.length) { ICE_SERVERS = j.iceServers; iceHasTurn = !!j.turn; log(j.turn ? 'TURN relay available for off-network viewers' : 'No TURN relay configured (STUN only)'); }
             } catch (e) {}
         }
@@ -386,6 +428,7 @@
         }
         let viewerHw = false;
         function applyViewerMsg(data, peer) {
+            if (peer && viewerRole.get(peer.id) === 'view' && /^(input|paste|clipboard-sync)$/.test(data.type)) return;
             if (data.type === 'viewer-caps') {
                 if (peer) peer.hw = !!data.hw;
                 const hwPeers = peerList().filter(p => p.hw).length;
@@ -662,7 +705,10 @@
         }
 
         function initSocket() {
-            socket = io(SIGNALING_URL, { transports: ['websocket','polling'] });
+            socket = CLOUD ? io(CLOUD.server, { auth: { deviceId: CLOUD.deviceId, secret: CLOUD.secret }, transports: ['websocket'] }) : io(SIGNALING_URL, { transports: ['websocket','polling'] });
+            socket.on('device-removed', async () => { log('This computer was removed from its account', 'error'); await window.electronAPI.cloudUnlink(); location.reload(); });
+            socket.on('error', (m) => log(String(m), 'error'));
+            CLOUD && socket.on('input-event', (data) => isHost && !inputLocked && !document.getElementById('viewOnlyToggle').checked && window.electronAPI.relayInput(data));
             socket.on('connect', () => {
                 log('Signaling server connected', 'success');
                 loadIce();
@@ -697,6 +743,7 @@
                 if (!isHost || !roomId) return;
                 const info = viewerInfoOf(payload);
                 if (!info.id) return;
+                payload && payload.role && (viewerRole.set(info.id, payload.role), log(`${info.label} joined${payload.role === 'view' ? ' (view only)' : payload.role === 'owner' ? '' : ' as a guest'}`, 'success'));
                 rememberViewer(info);
                 if (svViewers.has(info.id)) return;
                 const peer = peers.get(info.id);
@@ -1129,6 +1176,7 @@
         }
 
         (async () => {
+            try { await paintCloud(); } catch (e) {}
             try {
                 const mode = await window.electronAPI?.captureMode?.();
                 portalCapture = !!mode?.portal;
@@ -1285,6 +1333,7 @@
         }
 
         async function pairUrl() {
+            if (CLOUD) return `${CLOUD.server}/viewer?code=${roomId}`;
             const t = parsePairTarget();
             return `${t.proto}://${t.authority}/viewer?host=${encodeURIComponent(t.host)}&code=${roomId}`;
         }
@@ -1342,7 +1391,7 @@
             const s = await authStatus();
             const panel = document.getElementById('remotePanel'), hint = document.getElementById('tunnelHint');
             if (!panel) return;
-            panel.style.display = (s.enabled && s.required) ? '' : 'none';
+            panel.style.display = (s.enabled && s.required && !CLOUD) ? '' : 'none';
             if (!s.enabled || !s.required) return;
             tunnelHost = s.hostname;
             hint.textContent = `https://${s.hostname} · ${s.devices} device${s.devices === 1 ? '' : 's'} enrolled`;

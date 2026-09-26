@@ -31,9 +31,13 @@ const upload = multer({
 });
 
 const auth = require('./auth').createAuth(DATA_ROOT);
+const CLOUD = process.env.AMNI_CLOUD === '1';
+const cloud = CLOUD ? require('./cloud').createCloud(DATA_ROOT, fs.readFileSync(path.join(DATA_ROOT, 'auth-secret'), 'utf8').trim()) : null;
 app.use(express.json({ limit: '64kb' }));
-auth.routes(app);
-const gate = (req, res, next) => auth.allowed(req.headers) ? next() : res.status(401).json({ error: 'passkey required', authRequired: true });
+cloud ? (cloud.routes(app), app.get(['/auth/status', '/auth/me'], (req, res) => res.json({ enabled: false, cloud: true, authed: !!cloud.userOf(req.headers) }))) : auth.routes(app);
+const devHeader = (h) => { const [deviceId, secret] = String((h && h['x-amni-device']) || '').split(':'); return cloud && deviceId ? cloud.deviceAuth({ deviceId, secret }) : null; };
+const allowedReq = (h) => cloud ? !!(cloud.userOf(h) || devHeader(h)) : auth.allowed(h);
+const gate = (req, res, next) => allowedReq(req.headers) ? next() : res.status(401).json({ error: cloud ? 'sign in' : 'passkey required', authRequired: true });
 const assets = new Map();
 const asset = (rel) => assets.get(rel) || fs.readFileSync(path.join(__dirname, rel));
 const SIO_DIR = path.join('node_modules', 'socket.io-client', 'dist');
@@ -43,6 +47,11 @@ app.get('/socket.io-client/:file', (req, res) => {
   try {
     res.type(file.endsWith('.map') ? 'application/json' : 'application/javascript').send(asset(path.join(SIO_DIR, file)));
   } catch (_) { res.status(404).end(); }
+});
+app.get(['/', '/app', '/invite/:token'], (req, res, next) => {
+  if (!cloud) return req.path === '/' ? next() : res.status(404).end();
+  res.set('Cache-Control', 'no-store');
+  try { res.type('html').send(asset('cloud.html')); } catch (e) { res.status(500).type('text').send('cloud.html unreadable'); }
 });
 app.get(['/', '/viewer'], (_, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -93,6 +102,7 @@ function loadStickyRoom() {
 }
 loadStickyRoom();
 function viewerInfo(socket) {
+  if (socket.data && socket.data.user) return { id: socket.id, label: socket.data.user.name, from: String((socket.handshake.headers && socket.handshake.headers['cf-connecting-ip']) || sockIp(socket) || ''), role: socket.data.role, user: socket.data.user.id };
   const sess = auth.session(socket.handshake.headers);
   const ip = sockIp(socket);
   const cf = String((socket.handshake.headers && socket.handshake.headers['cf-connecting-ip']) || '').trim();
@@ -171,10 +181,20 @@ app.get('/rooms', (req, res) => {
   if (!auth.isLoopback(req)) return res.status(403).json({ error: 'host window only' });
   res.json({ rooms: [...rooms].map(([id, r]) => ({ id, host: !!(r.host && r.host.connected), viewers: r.viewers.size, people: viewersOf(r) })) });
 });
+if (cloud) cloud.setKick((deviceId, userId) => {
+  const room = rooms.get(deviceId);
+  if (!room) return;
+  for (const v of [...room.viewers]) if (!userId || (v.data.user && v.data.user.id === userId)) { try { v.emit('kicked', { roomId: deviceId }); } catch (_) {} setTimeout(() => { try { v.disconnect(true); } catch (_) {} }, 30); }
+  if (!userId && room.host) { try { room.host.emit('device-removed'); room.host.disconnect(true); } catch (_) {} rooms.delete(deviceId); }
+});
 io.on('connection', (socket) => {
   const mine = lanIp(sockIp(socket));
   if (mine) socket.emit('your-lan', mine);
+  const deviceId = cloud ? cloud.deviceAuth(socket.handshake.auth) : null;
+  if (cloud && socket.handshake.auth && socket.handshake.auth.deviceId && !deviceId) { socket.emit('device-removed'); return socket.disconnect(true); }
+  if (deviceId) { socket.data.device = deviceId; cloud.markOnline(deviceId, socket); socket.on('disconnect', () => cloud.markOffline(deviceId, socket)); }
   socket.on('create-room', (customId) => {
+    if (cloud) { if (!deviceId) return socket.emit('error', 'Link this computer to an account first'); if (!claimRoom(socket, deviceId)) socket.emit('error', 'This computer is already hosting from another window'); return; }
     if (auth.isRemote(socket.handshake.headers)) return socket.emit('error', 'Hosting is only available from the host window');
     let id = roomCode(customId);
     if (id.length < 4) id = uuidv4().slice(0, 8).toUpperCase();
@@ -185,6 +205,16 @@ io.on('connection', (socket) => {
   });
 
   socket.on('join-room', (roomId) => {
+    if (cloud) {
+      const hh = socket.handshake.headers, u = (!hh.origin || (() => { try { return new URL(hh.origin).host === hh.host; } catch (_) { return false; } })()) && cloud.userOf(hh), id = roomCode(roomId), r = u && cloud.role(u.id, id), room = r && rooms.get(id);
+      if (!u) return socket.emit('error', 'Sign in at ' + (socket.handshake.headers.host || 'connect.amni-scient.com') + ' first');
+      if (!r) return socket.emit('error', 'You do not have access to this computer');
+      socket.data.user = { id: u.id, name: u.name }; socket.data.role = r;
+      if (!room || !room.host || !room.host.connected) { if (!room) rooms.set(id, { host: null, viewers: new Set() }); }
+      const rm = rooms.get(id); socket.join(id); rm.viewers.add(socket); socket.emit('room-joined', id);
+      if (rm.host && rm.host.connected) { rm.host.emit('viewer-joined', viewerInfo(socket)); emitOccupancy(rm); } else socket.emit('error', 'This computer is offline');
+      return;
+    }
     if (!auth.allowed(socket.handshake.headers)) { socket.emit('auth-required'); return socket.emit('error', 'Passkey required'); }
     const who = clientKey(socket), now = Date.now(), fails = joinFails.get(who);
     if (fails && now - fails.t < JOIN_FAIL_WINDOW_MS && fails.n >= JOIN_FAIL_MAX) return socket.emit('error', 'Too many wrong room codes - try again later');
@@ -225,6 +255,7 @@ io.on('connection', (socket) => {
   const route = (ev) => socket.on(ev, (data) => {
     if (!data) return;
     const room = rooms.get(roomCode(data.roomId));
+    if (cloud && !(room && (room.host === socket || room.viewers.has(socket)))) return;
     const out = { ...data, from: socket.id };
     if (room && room.host === socket) return (data.to ? socket.to(String(data.to)) : socket.to(data.roomId)).emit(ev, out);
     if (room && room.host && room.host.connected) return room.host.emit(ev, out);
@@ -233,13 +264,14 @@ io.on('connection', (socket) => {
   ['offer', 'answer', 'ice-candidate'].forEach(route);
   socket.on('sv', (data) => {
     const room = data && rooms.get(roomCode(data.roomId));
-    if (!room || !auth.allowed(socket.handshake.headers)) return;
+    if (!room || (!cloud && !auth.allowed(socket.handshake.headers))) return;
     if (room.host === socket) return data.to && [...room.viewers].some(v => v.id === String(data.to)) && socket.to(String(data.to)).emit('sv', data);
     if (room.viewers.has(socket) && room.host && room.host.connected && ['want', 'ack', 'key', 'stop'].includes(data.t)) room.host.emit('sv', { t: data.t, seq: Number(data.seq) || 0, roomId: data.roomId, from: socket.id });
   });
 
   socket.on('input-event', (data) => {
-    if (!auth.allowed(socket.handshake.headers)) return socket.emit('input-dropped', { reason: 'passkey required' });
+    if (socket.data.role === 'view') return socket.emit('input-dropped', { reason: 'view-only' });
+    if (!cloud && !auth.allowed(socket.handshake.headers)) return socket.emit('input-dropped', { reason: 'passkey required' });
     const room = rooms.get(roomCode(data.roomId));
     // Never drop input silently -- a dead relay used to look identical to a working one,
     // because video rides WebRTC peer-to-peer and keeps flowing after signaling dies.
