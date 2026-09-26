@@ -576,6 +576,16 @@ function writeInput(event, src) {
 }
 ipcMain.on('send-input-event', (_, event) => { writeInput(event, 'p2p'); });
 ipcMain.handle('send-input-event', (_, event) => ({ status: writeInput(event, 'p2p') ? 'sent' : 'no-backend' }));
+const CLOUD_FILE = path.join(USER_DATA, 'cloud-device.json'), CLOUD_DEFAULT = process.env.AMNI_CLOUD_URL || 'https://connect.amni-scient.com';
+const readCloud = () => { try { return JSON.parse(fs.readFileSync(CLOUD_FILE, 'utf8')); } catch (_) { return null; } };
+let cloudPair = null;
+const cloudFetch = async (base, p, o = {}) => { const r = await fetch(String(base).replace(/\/+$/, '') + p, { method: o.method || 'GET', headers: { 'Content-Type': 'application/json', ...(o.headers || {}) }, body: o.body ? JSON.stringify(o.body) : undefined }); const j = await r.json().catch(() => ({})); if (!r.ok && !j.status) throw new Error(j.error || 'HTTP ' + r.status); return j; };
+ipcMain.handle('cloud-get', () => { const c = readCloud(); return { server: (c && c.server) || CLOUD_DEFAULT, linked: !!(c && c.deviceId), deviceId: (c && c.deviceId) || '', secret: (c && c.secret) || '', name: (c && c.name) || '' }; });
+ipcMain.handle('cloud-pair-start', async (_, server) => { const base = String(server || CLOUD_DEFAULT).trim().replace(/\/+$/, ''); const j = await cloudFetch(base, '/api/devices/pair/start', { method: 'POST', body: { name: os.hostname().replace(/\.local$/, ''), platform: process.platform } }); cloudPair = { base, poll: j.poll }; return { code: j.code, expiresIn: j.expiresIn }; });
+ipcMain.handle('cloud-pair-poll', async () => { if (!cloudPair) return { status: 'expired' }; const j = await cloudFetch(cloudPair.base, '/api/devices/pair/poll?poll=' + encodeURIComponent(cloudPair.poll)); j.status === 'paired' && (fs.writeFileSync(CLOUD_FILE, JSON.stringify({ server: cloudPair.base, deviceId: j.deviceId, secret: j.secret, name: j.name }), { mode: 0o600 }), cloudPair = null, hostLog('cloud linked ' + j.deviceId)); return { status: j.status, name: j.name }; });
+ipcMain.handle('cloud-unlink', () => { try { fs.unlinkSync(CLOUD_FILE); } catch (_) {} hostLog('cloud unlinked'); return true; });
+ipcMain.handle('cloud-ice', async () => { const c = readCloud(); return c ? cloudFetch(c.server, '/ice-servers', { headers: { 'x-amni-device': c.deviceId + ':' + c.secret } }) : null; });
+ipcMain.on('relay-input', (_, event) => { writeInput(event, 'relay'); });
 ipcMain.on('input-gate', (_, g) => { inputGate = { locked: !!(g && g.locked), viewOnly: !!(g && g.viewOnly) }; });
 ipcMain.on('hw-frame-ack', () => { hwPending = false; hwPendingAt = 0; });
 ipcMain.on('renderer-log', (_, msg) => hostLog('ui ' + String(msg).slice(0, 400)));

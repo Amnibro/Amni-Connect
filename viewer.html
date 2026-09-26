@@ -515,7 +515,7 @@ function connect() {
   const origin = /:\d+$/.test(host) ? `${proto}://${host}` : `${proto}://${host}:${port}`;
   socket = io(origin, { transports: ['websocket','polling'] });
   const joinNow = async () => { await loadIce(origin); socket.emit('join-room', code); paintLinkChips(); };
-  socket.on('connect', async () => { setStatus('Connected to signaling server'); await refreshAuth(origin); needsPasskey() ? (setStatus('Passkey required'), showUnlock(origin, joinNow)) : joinNow(); });
+  socket.on('connect', async () => { setStatus('Connected to signaling server'); await refreshAuth(origin); if (authState.cloud && !authState.authed) return location.assign('/app'); needsPasskey() ? (setStatus('Passkey required'), showUnlock(origin, joinNow)) : joinNow(); });
   socket.on('auth-required', () => { setStatus('Passkey required'); showUnlock(origin, joinNow); });
   socket.on('disconnect', () => paintLinkChips());
   socket.on('connect_error', () => setStatus('Cannot reach host — check IP and ensure server is running'));
