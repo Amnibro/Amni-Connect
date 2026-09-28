@@ -40,6 +40,14 @@ function createCloud(dataRoot, secret) {
   const limited = (key) => { const f = fails.get(key); return f && now() - f.t < 15 * 60 * 1000 && f.n >= 10; };
   const failed = (key) => { const f = fails.get(key) && now() - fails.get(key).t < 15 * 60 * 1000 ? fails.get(key) : { n: 0, t: now() }; f.n++; fails.set(key, f); };
   const role = (uid, did) => { const d = db.devices[did]; if (!d || !uid) return null; if (d.owner === uid) return 'owner'; const pc = db.users[uid]?.via === 'passcode' && conf().passcode; if (pc) return db.users[d.owner]?.login === pc.owner ? pc.role || 'control' : null; const g = db.grants.find((x) => x.device === did && x.user === uid && (!x.exp || x.exp > now())); return g ? g.role : null; };
+  const byCode = (uid, raw, from) => {
+    const id = String(raw || '').trim().toUpperCase().replace(/\s+/g, '-').replace(/[^A-Z0-9-]/g, ''), k = 'pc:' + uid, ki = 'pi:' + (from || ''), r = uid && role(uid, id);
+    if (r) return { id, role: r };
+    if (!uid || limited(k) || (from && limited(ki))) return { error: 'Too many wrong codes, wait 15 minutes' };
+    if (!db.devices[id]) { failed(k); from && failed(ki); return { error: 'No computer has that code' }; }
+    db.grants.push({ device: id, user: uid, role: 'control', exp: 0, by: 'code', at: now() }); save();
+    return { id, role: 'control' };
+  };
   const deviceView = (did, uid) => { const d = db.devices[did]; return { id: did, name: d.name, platform: d.platform, online: online.has(did), lastSeen: online.has(did) ? now() : d.lastSeen || null, role: role(uid, did), owner: db.users[d.owner]?.name || '' }; };
   const need = (req, res) => { const u = userOf(req.headers); if (!u) { res.status(401).json({ error: 'sign in' }); return null; } return u; };
   const owned = (req, res) => { const u = need(req, res); if (!u) return null; const d = db.devices[req.params.id]; if (!d || d.owner !== u.id) { res.status(404).json({ error: 'not your device' }); return null; } return { u, d }; };
@@ -121,11 +129,11 @@ function createCloud(dataRoot, secret) {
     });
     app.post('/api/devices/pair/claim', (req, res) => {
       const u = need(req, res); if (!u) return;
-      const room = clean(req.body?.code, 40).toUpperCase().replace(/[^A-Z0-9-]/g, ''), dev = db.devices[room];
-      if (dev) return res.status(400).json({ error: dev.owner === u.id ? `${room} is already one of your computers.` : `${room} is a computer's room code, not a link code. Ask its owner to share it with you, or for an invite link.` });
+      const room = clean(req.body?.code, 40).toUpperCase().replace(/\s+/g, '-').replace(/[^A-Z0-9-]/g, '');
+      if (db.devices[room]) { const r = byCode(u.id, room, ip(req)); return r.error ? res.status(429).json({ error: r.error }) : res.json({ ok: true, joined: true, device: deviceView(r.id, u.id) }); }
       const c = clean(req.body?.code, 12).toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^(.{4})(.{4})$/, '$1-$2'), p = db.pairs[c];
-      if (limited('pc:' + u.id)) return res.status(429).json({ error: 'Too many wrong codes, wait 15 minutes' });
-      if (!p || p.exp < now() || p.device) { failed('pc:' + u.id); return res.status(404).json({ error: 'That code is wrong or expired' }); }
+      if (limited('pc:' + u.id) || limited('pi:' + ip(req))) return res.status(429).json({ error: 'Too many wrong codes, wait 15 minutes' });
+      if (!p || p.exp < now() || p.device) { failed('pc:' + u.id); failed('pi:' + ip(req)); return res.status(404).json({ error: 'That code is wrong or expired' }); }
       const nm = clean(req.body?.name, 48) || p.name, want = nm.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32), id = /^[A-Z0-9][A-Z0-9-]{2,31}$/.test(want) && !db.devices[want] ? want : code(10), s = rid(32); db.devices[id] = { owner: u.id, name: nm, platform: p.platform, secret: sha(s), created: now(), lastSeen: null };
       p.device = id; p.secret = s; save(); res.json({ ok: true, device: deviceView(id, u.id) });
     });
@@ -155,6 +163,6 @@ function createCloud(dataRoot, secret) {
   const deviceAuth = (auth) => { const id = String(auth?.deviceId || ''), d = db.devices[id]; return d && auth?.secret && sha(auth.secret) === d.secret ? id : null; };
   const markOnline = (id, sock) => { online.set(id, sock); const d = db.devices[id]; if (d) { d.lastSeen = now(); save(); } };
   const markOffline = (id, sock) => { if (online.get(id) === sock) { online.delete(id); const d = db.devices[id]; if (d) { d.lastSeen = now(); save(); } } };
-  return { routes, userOf, role, ipOk, hashPw, deviceAuth, markOnline, markOffline, setKick, db };
+  return { routes, userOf, role, byCode, peerIp, ipOk, hashPw, deviceAuth, markOnline, markOffline, setKick, db };
 }
 module.exports = { createCloud };

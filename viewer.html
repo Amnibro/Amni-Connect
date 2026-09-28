@@ -515,7 +515,7 @@ function connect() {
   const origin = /:\d+$/.test(host) ? `${proto}://${host}` : `${proto}://${host}:${port}`;
   socket = io(origin, { transports: ['websocket','polling'] });
   const joinNow = async () => { await loadIce(origin); socket.emit('join-room', code); paintLinkChips(); };
-  socket.on('connect', async () => { setStatus('Connected to signaling server'); await refreshAuth(origin); if (authState.cloud && !authState.authed) return location.assign('/app'); needsPasskey() ? (setStatus('Passkey required'), showUnlock(origin, joinNow)) : joinNow(); });
+  socket.on('connect', async () => { setStatus('Connected to signaling server'); await refreshAuth(origin); if (authState.cloud && !authState.authed) return location.assign('/app' + (code ? '?code=' + encodeURIComponent(code) : '')); needsPasskey() ? (setStatus('Passkey required'), showUnlock(origin, joinNow)) : joinNow(); });
   socket.on('auth-required', () => { setStatus('Passkey required'); showUnlock(origin, joinNow); });
   socket.on('disconnect', () => paintLinkChips());
   socket.on('connect_error', () => setStatus('Cannot reach host — check IP and ensure server is running'));
@@ -529,7 +529,7 @@ function connect() {
     sockMode ? (socket.emit('sv', { t: 'want', roomId }), setStatus(`Joined room ${id} \u2014 socket stream (this browser has no WebRTC)\u2026`)) : createPC();
   });
   socket.on('sv', svFrame);
-  socket.on('error', (msg) => setStatus(`Error: ${msg}`));
+  socket.on('error', (msg) => /^Sign in at /.test(String(msg)) ? location.assign('/app?code=' + encodeURIComponent(code)) : setStatus(`Error: ${msg}`));
   socket.on('offer', async ({ offer, to }) => {
     if (to && socket.id && to !== socket.id) return;
     if (!pc) createPC();

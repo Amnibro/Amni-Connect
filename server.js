@@ -208,9 +208,9 @@ io.on('connection', (socket) => {
 
   socket.on('join-room', (roomId) => {
     if (cloud) {
-      const hh = socket.handshake.headers, u = (!hh.origin || (() => { try { return new URL(hh.origin).host === hh.host; } catch (_) { return false; } })()) && cloud.userOf(hh), id = roomCode(roomId), r = u && cloud.role(u.id, id), room = r && rooms.get(id);
+      const hh = socket.handshake.headers, u = (!hh.origin || (() => { try { return new URL(hh.origin).host === hh.host; } catch (_) { return false; } })()) && cloud.userOf(hh), id = roomCode(roomId), got = u ? cloud.byCode(u.id, id, cloud.peerIp(hh, socket.handshake.address)) : {}, r = got.role, room = r && rooms.get(id);
       if (!u) return socket.emit('error', 'Sign in at ' + (socket.handshake.headers.host || 'connect.amni-scient.com') + ' first');
-      if (!r) return socket.emit('error', 'You do not have access to this computer');
+      if (!r) return socket.emit('error', got.error || 'You do not have access to this computer');
       socket.data.user = { id: u.id, name: u.name }; socket.data.role = r;
       if (!room || !room.host || !room.host.connected) { if (!room) rooms.set(id, { host: null, viewers: new Set() }); }
       const rm = rooms.get(id); socket.join(id); rm.viewers.add(socket); socket.emit('room-joined', id);
