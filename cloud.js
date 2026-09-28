@@ -124,7 +124,7 @@ function createCloud(dataRoot, secret) {
       const c = clean(req.body?.code, 12).toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^(.{4})(.{4})$/, '$1-$2'), p = db.pairs[c];
       if (limited('pc:' + u.id)) return res.status(429).json({ error: 'Too many wrong codes, wait 15 minutes' });
       if (!p || p.exp < now() || p.device) { failed('pc:' + u.id); return res.status(404).json({ error: 'That code is wrong or expired' }); }
-      const id = code(10), s = rid(32); db.devices[id] = { owner: u.id, name: clean(req.body?.name, 48) || p.name, platform: p.platform, secret: sha(s), created: now(), lastSeen: null };
+      const nm = clean(req.body?.name, 48) || p.name, want = nm.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32), id = /^[A-Z0-9][A-Z0-9-]{2,31}$/.test(want) && !db.devices[want] ? want : code(10), s = rid(32); db.devices[id] = { owner: u.id, name: nm, platform: p.platform, secret: sha(s), created: now(), lastSeen: null };
       p.device = id; p.secret = s; save(); res.json({ ok: true, device: deviceView(id, u.id) });
     });
     app.patch('/api/devices/:id', (req, res) => { const o = owned(req, res); if (!o) return; o.d.name = clean(req.body?.name, 48) || o.d.name; save(); res.json({ ok: true }); });
