@@ -296,7 +296,7 @@
             srv.disabled = !!CLOUD;
             btn.textContent = CLOUD ? 'Unlink' : 'Link';
             btn.onclick = CLOUD ? cloudUnlink : cloudLink;
-            hint.textContent = CLOUD ? `Linked as ${c.name}. Open ${c.server.replace(/^https?:\/\//, '')} to connect or share.` : 'Link this computer to reach it from any browser, walled off behind your account.';
+            hint.textContent = CLOUD ? `Linked as ${c.name}. Open ${(c.public || c.server).replace(/^https?:\/\//, '')} to connect or share.` : 'Link this computer to reach it from any browser, walled off behind your account.';
             codeEl.style.display = CLOUD ? 'none' : '';
             CLOUD && (codeEl.value = c.deviceId);
         }
@@ -1254,7 +1254,7 @@
                 localStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: videoConstraints } });
             }
             if (localStream) localStream.getVideoTracks().forEach(tuneVideoTrack);
-            localStream?.getTracks().forEach(t => t.onended = () => hwPath && t.kind === 'audio' ? log('Desktop audio ended', 'error') : endSession(true));
+            localStream?.getTracks().forEach(t => t.onended = () => hwPath && t.kind === 'audio' ? log('Desktop audio ended', 'error') : endSession(true, true));
             isHost = true;
             socket.emit('create-room', customCode);
             socket.once('room-created', async (id) => {
@@ -1335,7 +1335,7 @@
         }
 
         async function pairUrl() {
-            if (CLOUD) return `${CLOUD.server}/viewer?code=${roomId}`;
+            if (CLOUD) return `${CLOUD.public || CLOUD.server}/viewer?code=${roomId}`;
             const t = parsePairTarget();
             return `${t.proto}://${t.authority}/viewer?host=${encodeURIComponent(t.host)}&code=${roomId}`;
         }
@@ -1433,13 +1433,13 @@
             log(`Mobile link copied: ${url}`, 'success');
         }
 
-        function endSession(force) {
+        function endSession(force, auto) {
             window.electronAPI?.setTrayHost?.(false);
             window.electronAPI?.showWindow?.();
             if (force || confirm('End this session?')) {
                 statsLoop && clearInterval(statsLoop);
                 if (isHost && hwPath) window.electronAPI?.stopHwCapture?.();
-                sessionStorage.setItem('amni-ended', '1');
+                auto && CLOUD ? sessionStorage.removeItem('amni-ended') : sessionStorage.setItem('amni-ended', '1');
                 location.reload();
             }
         }
