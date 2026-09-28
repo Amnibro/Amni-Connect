@@ -70,7 +70,8 @@ function createCloud(dataRoot, secret) {
       if (req.headers['x-amni-connect'] !== '1') return res.status(403).json({ error: 'Bad request' });
       const a = crypto.randomBytes(32).toString('hex'), body = Buffer.from(JSON.stringify({ a, exp: now() + 10 * 60 * 1000 })).toString('base64url'), origin = (secure(req) ? 'https://' : 'http://') + String(req.headers.host || '').replace(/[^\w.:\-\[\]]/g, '').slice(0, 100);
       res.setHeader('Set-Cookie', `ac_haven=${body}.${havenSeal(body)}; Path=/api/haven; HttpOnly; SameSite=Lax; Max-Age=600${secure(req) ? '; Secure' : ''}`);
-      res.json({ url: `${base}/api/auth/SSO?authCode=${a}&origin=${encodeURIComponent(origin)}` });
+      const ret = /^\/(app|invite\/[\w-]{1,64})$/.test(String(req.body?.ret || '')) ? req.body.ret : '/app';
+      res.json({ url: `${base}/api/auth/SSO?authCode=${a}&origin=${encodeURIComponent(origin)}&return=${encodeURIComponent(ret)}` });
     });
     app.post('/api/haven/finish', async (req, res) => {
       const base = havenBase();

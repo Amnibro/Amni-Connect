@@ -82,8 +82,8 @@ app.on('render-process-gone', (_e, _wc, d) => hostLog(`render-process-gone reaso
 process.on('uncaughtException', (e) => hostLog('uncaughtException ' + ((e && e.stack) || e)));
 
 function trayIcon() {
-  const p = path.join(__dirname, 'assets', 'icon.png');
-  try { if (fs.existsSync(p)) return process.platform === 'darwin' ? nativeImage.createFromPath(p).resize({ height: 18 }) : nativeImage.createFromPath(p); } catch (_) {}
+  const p = [path.join(__dirname, 'ui', 'brand', 'tray.png'), path.join(__dirname, 'assets', 'icon.png')].find((f) => fs.existsSync(f));
+  try { if (p) return process.platform === 'darwin' ? nativeImage.createFromPath(p).resize({ height: 18 }) : nativeImage.createFromPath(p); } catch (_) {}
   return nativeImage.createEmpty();
 }
 function rebuildTrayMenu(label) {
@@ -346,12 +346,10 @@ function createWindow() {
   mainWindow.on('close', (e) => {
     if (quitting) return;
     e.preventDefault();
-    ensureTray('Amni-Connect');
-    hideWindow();
-    hostLog('window hidden — signaling still listening');
+    ensureTray('Amni-Connect') ? (hideWindow(), hostLog('window hidden — signaling still listening')) : (mainWindow.minimize(), hostLog('no tray icon — window minimized to the taskbar instead of hidden'));
   });
   mainWindow.on('minimize', () => {
-    ensureTray('Amni-Connect');
+    if (!ensureTray('Amni-Connect')) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
     hideWindow();
     hostLog('window hidden — minimize, session stays up');
