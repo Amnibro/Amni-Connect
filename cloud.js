@@ -121,6 +121,8 @@ function createCloud(dataRoot, secret) {
     });
     app.post('/api/devices/pair/claim', (req, res) => {
       const u = need(req, res); if (!u) return;
+      const room = clean(req.body?.code, 40).toUpperCase().replace(/[^A-Z0-9-]/g, ''), dev = db.devices[room];
+      if (dev) return res.status(400).json({ error: dev.owner === u.id ? `${room} is already one of your computers.` : `${room} is a computer's room code, not a link code. Ask its owner to share it with you, or for an invite link.` });
       const c = clean(req.body?.code, 12).toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^(.{4})(.{4})$/, '$1-$2'), p = db.pairs[c];
       if (limited('pc:' + u.id)) return res.status(429).json({ error: 'Too many wrong codes, wait 15 minutes' });
       if (!p || p.exp < now() || p.device) { failed('pc:' + u.id); return res.status(404).json({ error: 'That code is wrong or expired' }); }
