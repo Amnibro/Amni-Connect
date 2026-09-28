@@ -62,8 +62,38 @@ function createCloud(dataRoot, secret) {
       fails.delete(key); issue(req, res, hit[0]); res.json({ ok: true, user: { id: hit[0], login, name: hit[1].name } });
     });
     app.post('/api/logout', (req, res) => { res.setHeader('Set-Cookie', `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`); res.json({ ok: true }); });
+    const havenBase = () => { const h = conf().haven; return h && h.url ? String(h.url).replace(/\/+$/, '') : ''; };
+    const havenSeal = (b) => sign('haven.' + b);
+    app.post('/api/haven/start', (req, res) => {
+      const base = havenBase();
+      if (!base) return res.status(404).json({ error: 'Haven sign-in is off' });
+      if (req.headers['x-amni-connect'] !== '1') return res.status(403).json({ error: 'Bad request' });
+      const a = crypto.randomBytes(32).toString('hex'), body = Buffer.from(JSON.stringify({ a, exp: now() + 10 * 60 * 1000 })).toString('base64url'), origin = (secure(req) ? 'https://' : 'http://') + String(req.headers.host || '').replace(/[^\w.:\-\[\]]/g, '').slice(0, 100);
+      res.setHeader('Set-Cookie', `ac_haven=${body}.${havenSeal(body)}; Path=/api/haven; HttpOnly; SameSite=Lax; Max-Age=600${secure(req) ? '; Secure' : ''}`);
+      res.json({ url: `${base}/api/auth/SSO?authCode=${a}&origin=${encodeURIComponent(origin)}` });
+    });
+    app.post('/api/haven/finish', async (req, res) => {
+      const base = havenBase();
+      if (!base) return res.status(404).json({ error: 'Haven sign-in is off' });
+      if (req.headers['x-amni-connect'] !== '1') return res.status(403).json({ error: 'Bad request' });
+      const m = String(req.headers.cookie || '').match(/(?:^|;\s*)ac_haven=([^;]+)/), [body, sig] = (m ? m[1] : '').split('.');
+      let p = null;
+      try { p = body && sig && havenSeal(body) === sig ? JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) : null; } catch (_) {}
+      if (!p || !p.a || p.exp < now()) return res.status(400).json({ error: 'That sign-in expired. Start again.' });
+      let r;
+      try { r = await fetch(`${base}/api/auth/SSO/authenticate?authCode=${p.a}`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10000) }); } catch (_) { return res.status(502).json({ error: 'Could not reach Haven' }); }
+      if (r.status === 404 || r.status === 429) return res.status(202).json({ pending: true });
+      const j = await r.json().catch(() => ({})), hn = String(j.username || '').toLowerCase();
+      if (!r.ok || !/^[\w.\-]{1,64}$/.test(hn)) return res.status(502).json({ error: 'Haven did not confirm the sign-in' });
+      const link = String((conf().haven.link || {})[hn] || '').toLowerCase(), login = link || 'haven:' + hn, hit = Object.entries(db.users).find(([, u]) => u.login === login);
+      if (!hit && link) return res.status(500).json({ error: 'The account linked to this Haven user is missing' });
+      if (!hit && conf().haven.open === false) return res.status(403).json({ error: `Haven account ${j.username} is not allowed here` });
+      const id = hit ? hit[0] : rid(9);
+      hit || (db.users[id] = { login, name: clean(j.displayName, 48) || hn, via: 'haven', created: now(), v: 0 }, save());
+      issue(req, res, id); res.json({ ok: true, user: { id, login, name: db.users[id].name } });
+    });
     app.post('/api/password', (req, res) => { const u = need(req, res); if (!u) return; if (!checkPw(req.body?.current, u.pw)) return res.status(401).json({ error: 'Current password is wrong' }); if (String(req.body?.password || '').length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' }); const x = db.users[u.id]; x.pw = hashPw(req.body.password); x.v = (x.v || 0) + 1; save(); issue(req, res, u.id); res.json({ ok: true }); });
-    app.get('/api/me', (req, res) => { const u = userOf(req.headers); res.json({ user: u ? { id: u.id, login: u.login, name: u.name, via: u.via || 'account' } : null, passcode: !!conf().passcode }); });
+    app.get('/api/me', (req, res) => { const u = userOf(req.headers); res.json({ user: u ? { id: u.id, login: u.login, name: u.name, via: u.via || 'account' } : null, passcode: !!conf().passcode, haven: (() => { try { return havenBase() ? new URL(havenBase()).origin : ''; } catch (_) { return ''; } })() }); });
     app.post('/api/passcode', (req, res) => {
       const pc = conf().passcode, key = 'pw:' + ip(req);
       if (!pc) return res.status(404).json({ error: 'Passcode entry is off' });
