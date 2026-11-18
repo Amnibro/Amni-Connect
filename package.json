@@ -87,10 +87,12 @@
       "executableName": "amni-connect",
       "icon": "assets/icon.png",
       "desktop": {
-        "Name": "Amni-Connect",
-        "Comment": "End-to-end encrypted remote desktop",
-        "Categories": "Network;RemoteAccess;",
-        "StartupWMClass": "amni-connect"
+        "entry": {
+          "Name": "Amni-Connect",
+          "Comment": "End-to-end encrypted remote desktop",
+          "Categories": "Network;RemoteAccess;",
+          "StartupWMClass": "amni-connect"
+        }
       },
       "extraResources": [
         {
