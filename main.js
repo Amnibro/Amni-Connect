@@ -168,7 +168,7 @@ let elevatedTask = process.platform === 'win32';
 let mediumReplaced = false;
 function killStrayRust() {
   if (elevatedTask) { try { spawn('schtasks', ['/end', '/tn', ELEVATED_TASK], { stdio: 'ignore' }).on('error', () => {}); } catch (_) {} }
-  const [bin, args] = process.platform === 'win32' ? ['taskkill', ['/F', '/IM', 'amni-control.exe']] : ['pkill', ['-f', 'amni-control']];
+  const [bin, args] = process.platform === 'win32' ? ['taskkill', ['/F', '/IM', 'amni-control.exe']] : ['pkill', ['-x', 'amni-control']];
   try { spawn(bin, args, { stdio: 'ignore' }).on('error', () => {}); } catch (_) {}
 }
 function restartRust(reason) {

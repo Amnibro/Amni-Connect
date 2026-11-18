@@ -1,4 +1,4 @@
-require('dotenv').config();
+try { process.loadEnvFile(); } catch (_) {}
 const express = require('express');
 const http = require('http');
 const path = require('path');
@@ -6,7 +6,6 @@ const fs = require('fs');
 const crypto = require('crypto');
 const multer = require('multer');
 const socketIo = require('socket.io');
-const { v4: uuidv4 } = require('uuid');
 
 const PORT = process.env.PORT || 3389;
 const ALLOWED_ORIGINS = (!process.env.ALLOWED_ORIGINS || process.env.ALLOWED_ORIGINS === '*')
@@ -177,11 +176,11 @@ io.on('connection', (socket) => {
   socket.on('create-room', (customId) => {
     if (auth.isRemote(socket.handshake.headers)) return socket.emit('error', 'Hosting is only available from the host window');
     let id = roomCode(customId);
-    if (id.length < 4) id = uuidv4().slice(0, 8).toUpperCase();
+    if (id.length < 4) id = crypto.randomUUID().slice(0, 8).toUpperCase();
     // A host reconnecting to its own fixed room code must RECLAIM it, not
     // silently drift to a random id -- that stranded the PC under an unguessable room and
     // looked like "no room" from the phone. Only bump to a random id if a LIVE host holds it.
-    if (!claimRoom(socket, id)) claimRoom(socket, uuidv4().slice(0, 8).toUpperCase());
+    if (!claimRoom(socket, id)) claimRoom(socket, crypto.randomUUID().slice(0, 8).toUpperCase());
   });
 
   socket.on('join-room', (roomId) => {

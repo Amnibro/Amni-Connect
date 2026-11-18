@@ -1,5 +1,16 @@
 # Amni-Connect Changelog
 
+## v1.6.22 - security update (2026-11-17)
+
+### Security
+- **View-only viewers can only watch.** The host keeps each viewer's role, drops typing, paste and clipboard sync from view-only viewers over the peer-to-peer channel, and no longer sends its clipboard to them.
+- The host log writes plain text, so a crafted file name cannot inject markup into the host window.
+- Electron 33 (out of support) is now Electron 45.3.4. electron-updater 6.8.11, express, multer and socket.io are updated and qs is pinned to 6.17.1, so the shipped dependencies have no known vulnerabilities.
+- Fewer dependencies: nodemon is gone, uuid is replaced by `crypto.randomUUID`, dotenv by `process.loadEnvFile`, and socket.io-client is only used by tests.
+
+### Fixed
+- Restarting a stuck input backend matched any process whose command line contained `amni-control`. It now matches the process name exactly.
+
 ## v1.6.21 - a sharp picture over the internet (2026-09-23)
 
 ### Fixed

@@ -1,6 +1,6 @@
 {
   "name": "amni-connect",
-  "version": "1.6.21",
+  "version": "1.6.22",
   "description": "End-to-end encrypted Rust + Electron remote desktop",
   "main": "main.js",
   "scripts": {
@@ -12,24 +12,21 @@
     "dist:all": "node scripts/make-icon.js && electron-builder --win nsis --linux AppImage deb rpm",
     "release": "node scripts/make-icon.js && electron-builder --win nsis --publish always",
     "release:linux": "node scripts/make-icon.js && electron-builder --linux AppImage deb rpm --publish always",
-    "dev": "nodemon server.js",
+    "dev": "node --watch server.js",
     "server": "node server.js"
   },
   "dependencies": {
     "@simplewebauthn/server": "^14.0.1",
-    "dotenv": "^16.6.1",
-    "electron-updater": "^6.8.9",
+    "electron-updater": "^6.8.11",
     "express": "^4.21.2",
     "multer": "^2.3.0",
     "qrcode": "^1.5.4",
-    "socket.io": "^4.8.1",
-    "socket.io-client": "^4.8.1",
-    "uuid": "^10.0.0"
+    "socket.io": "^4.8.1"
   },
   "devDependencies": {
-    "electron": "^33.2.0",
-    "electron-builder": "^25.1.8",
-    "nodemon": "^3.1.7"
+    "electron": "^45.3.4",
+    "electron-builder": "^26.18.0",
+    "socket.io-client": "^4.8.1"
   },
   "build": {
     "appId": "com.amni.connect",
@@ -146,5 +143,8 @@
     "type": "git",
     "url": "https://github.com/Amnibro/Amni-Connect.git"
   },
-  "license": "SEE LICENSE IN LICENSE"
+  "license": "SEE LICENSE IN LICENSE",
+  "overrides": {
+    "qs": "^6.17.1"
+  }
 }
