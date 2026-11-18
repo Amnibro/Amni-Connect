@@ -318,7 +318,7 @@
             const extra = rewriteLocal(candidate, peerLan);
             if (extra) p.addIceCandidate(new RTCIceCandidate(extra)).catch(() => {});
         }
-        const peers = new Map();
+        const peers = new Map(), viewerRoles = new Map(), viewOnlyPeer = peer => !!peer && viewerRoles.get(peer.id) === 'view';
         const peerList = () => [...peers.values()];
         const peerPcs = () => isHost ? peerList().map(p => p.pc) : (pc ? [pc] : []);
         const pcFor = (from) => isHost && from && peers.get(from) ? peers.get(from).pc : pc;
@@ -331,7 +331,10 @@
 
         function log(msg, type = 'info') {
             const color = type === 'success' ? '#86efac' : type === 'error' ? '#fda4af' : '#e0f2fe';
-            logEl.innerHTML += `<span style="color:${color}">[${new Date().toLocaleTimeString()}] ${msg}</span><br>`;
+            const line = document.createElement('span');
+            line.style.color = color;
+            line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logEl.append(line, document.createElement('br'));
             logEl.scrollTop = logEl.scrollHeight;
             window.electronAPI?.logLine?.(msg);
         }
@@ -395,6 +398,7 @@
                 log((peer ? 'Viewer ' + peer.id.slice(0, 6) + ' ' : 'Viewer ') + (data.hw ? 'can decode hardware frames' : 'needs the normal video track') + (peers.size > 1 ? ' (' + hwPeers + '/' + peers.size + ' on HW)' : ''));
                 return;
             }
+            if (viewOnlyPeer(peer) && ['input', 'paste', 'clipboard-sync'].includes(data.type)) return;
             if (data.type === 'input') {
                 if (data.ev && data.ev.type === 'mouse-move') { inCount.moves++; if (staleMove(data.seq, peer)) { inCount.stale++; return; } }
                 if (isHost && !inputLocked && !document.getElementById('viewOnlyToggle').checked) window.electronAPI.sendInputEvent(data.ev);
@@ -694,6 +698,7 @@
                 if (!isHost || !roomId) return;
                 const info = viewerInfoOf(payload);
                 if (!info.id) return;
+                viewerRoles.set(info.id, payload && payload.role === 'view' ? 'view' : 'control');
                 rememberViewer(info);
                 if (svViewers.has(info.id)) return;
                 const peer = peers.get(info.id);
@@ -940,7 +945,7 @@
 
         let lastClipboard = '';
         setInterval(async () => {
-            const outs = isHost ? peerList().map(p => p.clip).filter(ch => ch && ch.readyState === 'open') : [];
+            const outs = isHost ? peerList().filter(p => !viewOnlyPeer(p)).map(p => p.clip).filter(ch => ch && ch.readyState === 'open') : [];
             if (outs.length) {
                 const text = await window.electronAPI.readClipboard();
                 if (text && text !== lastClipboard) { lastClipboard = text; outs.forEach(ch => { try { ch.send(JSON.stringify({ type: 'clipboard-sync', text })); } catch (_) {} }); }

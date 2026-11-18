@@ -17,7 +17,7 @@ ok('host picks the peer by the answer sender', /pcFor\(from\)/.test(indexHtml) &
 ok('a second join no longer closes the first peer', !/if \(live && info\.id === lastViewerId\)/.test(indexHtml) && /peer && isLive\(peer\.pc\)/.test(indexHtml));
 ok('viewer-left drops only that viewer', /if \(id\) dropViewerPc\(id\)/.test(indexHtml));
 ok('screen frames fan out to every HW viewer', /const screenOuts = \(\)/.test(indexHtml) && /outs\.forEach\(ch =>/.test(indexHtml));
-ok('clipboard sync fans out to every viewer', /peerList\(\)\.map\(p => p\.clip\)/.test(indexHtml));
+ok('clipboard sync fans out to every control viewer, never view-only', /peerList\(\)\.filter\(p => !viewOnlyPeer\(p\)\)\.map\(p => p\.clip\)/.test(indexHtml));
 ok('move seq is tracked per viewer', /function staleMove\(seq, peer\)/.test(indexHtml) && /peer\.moveSeq/.test(indexHtml));
 ok('viewer ignores offers addressed to someone else', /if \(to && socket\.id && to !== socket\.id\) return;/.test(viewerHtml));
 ok('server routes by to/from', /\['offer', 'answer', 'ice-candidate'\]\.forEach\(route\)/.test(serverJs) && /from: socket\.id/.test(serverJs));
